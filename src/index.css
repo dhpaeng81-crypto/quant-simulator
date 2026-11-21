@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  /* 한국 시장 관례: 상승 빨강, 하락 파랑 */
+  --color-up: #dc2626;
+  --color-up-soft: #fef2f2;
+  --color-down: #2563eb;
+  --color-down-soft: #eff6ff;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* 숫자는 자릿수 폭을 맞춰서 정렬 */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  accent-color: #0f172a;
+  height: 28px;
+}
+
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

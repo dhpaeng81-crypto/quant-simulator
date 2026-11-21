@@ -1,0 +1,9 @@
+{
+  "name": "매크로 시나리오 시뮬레이터",
+  "short_name": "시나리오",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
