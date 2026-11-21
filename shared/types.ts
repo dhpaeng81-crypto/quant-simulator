@@ -1,130 +1,121 @@
-// 서버와 화면이 함께 쓰는 타입 정의
+// 수집기(scripts/)와 화면(src/)이 함께 쓰는 데이터 형식.
+// 수집기가 public/data/ 아래에 이 형식의 JSON을 쓰고, 화면은 그것만 읽습니다.
 
-export type Direction = "UP" | "DOWN";
 export type Market = "KOSPI" | "KOSDAQ";
-export type SectorKey = "semiconductor" | "auto" | "platform" | "battery" | "bio" | "game" | "default";
 
-/** 시나리오 입력값 6개 */
-export interface Scenario {
-  usdKrw: number; // 원/달러 환율 (원)
-  nasdaqChange: number; // 나스닥 전일 대비 등락률 (%)
-  semiconductorChange: number; // 필라델피아 반도체 지수 등락률 (%)
-  oilPrice: number; // WTI 유가 (달러)
-  foreignFlow: number; // 외국인 수급 강도 -5(강한 순매도) ~ +5(강한 순매수), 사용자 입력
-  newsSentiment: number; // 뉴스 분위기 -100 ~ +100, 사용자 입력
-}
+/** 예측에 쓰는 입력 7개. 모두 한국 장이 열리기 전에 알 수 있는 값 */
+export const FEATURE_KEYS = ["nasdaq", "sox", "fx", "oil", "foreign", "institution", "prevReturn"] as const;
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+export type Features = Record<FeatureKey, number>;
 
-/** 환율·유가는 '기준값' 대비 변화로 점수를 낸다. 기준값 = 전일 종가 */
-export interface ScenarioReference {
-  usdKrw: number;
-  oilPrice: number;
-}
-
-export interface Stock {
-  code: string; // 6자리 종목코드
-  name: string;
-  market: Market;
-  sector: SectorKey;
-}
-
-export interface Quote {
-  price: number;
-  previousClose: number;
-  change: number;
-  changeRate: number; // %
-  volume: number | null;
-  asOf: string | null; // ISO 시각
-}
-
-export interface StockWithQuote extends Stock {
-  quote: Quote | null; // null = 시세를 가져오지 못함
-}
-
-export interface MacroValue {
-  id: "nasdaq" | "sox" | "usdkrw" | "oil";
-  name: string;
-  unit: string;
-  value: number | null;
-  previousClose: number | null;
-  changeRate: number | null;
-  asOf: string | null;
-}
-
-export type SignalLabel = "STRONG_UP" | "UP" | "NEUTRAL" | "DOWN" | "STRONG_DOWN";
-
-export interface FactorContribution {
-  id: "foreign" | "nasdaq" | "semiconductor" | "fx" | "sentiment" | "oil" | "momentum";
-  name: string;
-  beta: number;
-  input: number; // 정규화된 입력값 (-5 ~ +5)
-  contribution: number; // beta × input
-  share: number; // 점수에서 차지하는 절대 비중 % (합계 100)
-}
-
-export interface TrajectoryPoint {
-  day: string; // D+1 ...
-  dailyChangeRate: number;
-  cumulativeChangeRate: number;
-  price: number;
-}
-
-export interface Prediction {
-  score: number;
-  direction: Direction;
-  pUp: number; // 0~1, 점수를 시그모이드로 바꾼 값 (보정된 확률 아님)
-  confidence: number; // 50~90 (%)
-  signal: SignalLabel;
-  factors: FactorContribution[];
-  trajectory: TrajectoryPoint[];
-}
-
-export interface BacktestRecord {
-  date: string; // 한국 거래일 YYYY-MM-DD
+/** 하루치 원자료 */
+export interface DailyRow {
+  date: string; // YYYY-MM-DD (한국 거래일)
   close: number;
-  changeRate: number;
-  predicted: Direction;
-  actual: Direction | "FLAT";
-  correct: boolean | null; // FLAT이면 null (평가 제외)
-  score: number;
-  inputs: {
-    nasdaqChange: number | null;
-    semiconductorChange: number | null;
-    usdKrwChangeRate: number | null;
-    oilChangeRate: number | null;
-    prevDayChangeRate: number;
-  };
+  volume: number;
+  foreignNet: number | null; // 외국인 순매수 수량(주)
+  institutionNet: number | null; // 기관 순매수 수량(주)
 }
 
-export interface BacktestResult {
-  code: string;
-  name: string;
-  records: BacktestRecord[];
-  evaluatedDays: number;
-  correctDays: number;
-  accuracy: number | null; // %
-  alwaysUpAccuracy: number | null; // 비교 기준: 매일 '상승'이라고만 했을 때 적중률
-  strategyReturn: number; // %
+export interface Bar {
+  date: string; // YYYY-MM-DD (해당 시장 현지 날짜)
+  close: number;
+}
+
+/** 학습된 회귀 모델 (원 단위로 되돌린 계수) */
+export interface FittedModel {
+  intercept: number; // %
+  coef: Features; // 입력 1단위당 기대 수익률(%p)
+  mean: Features; // 학습 기간 평균 입력
+  sd: Features; // 학습 기간 입력 표준편차
+  sigma: number; // 잔차 표준편차 (%)
+  n: number; // 학습 일수
+  r2: number; // 학습 구간 설명력
+  trainStart: string;
+  trainEnd: string;
+  lambda: number;
+}
+
+export interface ForecastResult {
+  expectedReturn: number; // %
+  pUp: number; // 0~1
+  contributions: Features; // 평균적인 날 대비 각 입력이 더한 기대 수익률(%p)
+}
+
+export interface BacktestDay {
+  date: string;
+  actualReturn: number; // %
+  expectedReturn: number; // %
+  pUp: number;
+  hit: boolean | null; // 보합이면 null
+}
+
+export interface BacktestSummary {
+  days: BacktestDay[];
+  evaluated: number;
+  hits: number;
+  hitRate: number | null; // %
+  alwaysUpHitRate: number | null; // %
+  pValue: number | null; // 적중률이 50%와 다르다고 볼 근거 (양측, 정규 근사)
+  correlation: number | null; // 예측 기대수익률과 실제 수익률의 상관
+  strategyReturn: number; // % 상승 확률 > 50%인 날만 보유
   holdReturn: number; // %
-  notes: string[];
+  trainWindow: number;
 }
 
 export interface NewsItem {
   title: string;
-  link: string;
-  source: string | null;
-  publishedAt: string | null;
+  url: string;
+  source: string;
+  publishedAt: string; // ISO
 }
 
-export interface Commentary {
-  usMarket: string[];
-  macroNews: string[];
-  strategy: string;
-  sources: { title: string; uri: string }[];
-  generatedAt: string;
+export interface StockSummary {
+  code: string;
+  name: string;
+  market: Market;
+  rank: number; // 시가총액 순위(시장 내)
+  marketValue: number; // 억 원
+  close: number;
+  changeRate: number; // %
+  date: string;
+  pUp: number | null; // 다음 거래일 상승 확률 (모델이 없으면 null)
+  expectedReturn: number | null;
+  hitRate: number | null; // 백테스트 적중률
 }
 
-export interface Narrative {
-  analysis: string;
-  risks: string[];
-  generatedBy: "gemini" | "rules";
+export interface StockDetail {
+  code: string;
+  name: string;
+  market: Market;
+  history: DailyRow[]; // 최근 120거래일
+  model: FittedModel | null;
+  latestInputs: Features | null; // 다음 거래일 예측에 쓰는 실제 입력
+  inputsAsOf: Record<FeatureKey, string | null> | null; // 각 입력의 기준 날짜
+  forecast: ForecastResult | null;
+  backtest: BacktestSummary | null;
+  news: NewsItem[];
+  notes: string[];
+}
+
+export interface MacroQuote {
+  id: "kospi" | "kosdaq" | "nasdaq" | "sox" | "usdkrw" | "oil";
+  name: string;
+  value: number;
+  changeRate: number;
+  date: string;
+}
+
+export interface Briefing {
+  facts: string[]; // 데이터로 만든 문장 (항상 있음)
+  ai: { text: string[]; sources: { title: string; uri: string }[] } | null; // Gemini 요약 (키가 있을 때)
+}
+
+export interface IndexFile {
+  generatedAt: string; // ISO
+  nextTradingDayNote: string;
+  macro: MacroQuote[];
+  stocks: StockSummary[];
+  briefing: Briefing;
+  failures: string[]; // 수집에 실패한 종목 코드
 }

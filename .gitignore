@@ -5,4 +5,5 @@ coverage/
 *.log
 .env*
 !.env.example
-dist-server/
+# 수집기 출력 (Actions가 매번 새로 만듦)
+public/data/

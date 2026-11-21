@@ -1,19 +1,28 @@
-# 매크로 시나리오 시뮬레이터 — 작업 가이드
+# 다음 거래일 전망 — 작업 가이드
 
-구조와 공식은 `docs/ARCHITECTURE.md`, 실행 방법은 `README.md`를 먼저 읽으세요.
+`README.md`(실행·배포)와 `docs/ARCHITECTURE.md`(데이터·모델·백테스트)를 먼저 읽으세요.
+
+## 구조 요약
+
+- 서버 없음. `scripts/collect.ts`가 GitHub Actions에서 데이터를 모아 `public/data/*.json`을 만들고, 화면(`src/`)은 그 파일만 읽습니다.
+- 모델·백테스트는 `shared/model.ts` 한 곳에만 있습니다. 수집기(학습)와 화면(시나리오 재계산)이 같이 씁니다.
 
 ## 규칙
 
-1. **예측 숫자는 `shared/model.ts` 한 곳에서만** 계산합니다. 화면·서버·백테스트가 모두 이 파일을 씁니다. 사본을 만들지 마세요.
-2. **Gemini는 문장만** 씁니다. 점수·확률·가격을 Gemini가 정하게 하지 마세요.
-3. **데이터가 없으면 없다고 표시**합니다. 가짜 뉴스, 난수 결과, 추정치를 실측처럼 보여 주지 않습니다.
-4. 백테스트는 **그 날짜보다 앞선 값만** 씁니다(미래 정보 누출 금지). `tests/backtest.test.ts`가 지킵니다.
-5. '추천', '매수하세요' 같은 투자 권유 표현을 쓰지 않습니다. 상승은 빨강, 하락은 파랑(한국 관례).
-6. 모바일(폭 400px) 먼저 확인. 본문 14px 이상, 터치 44px 이상, 화면 확대 허용, `word-break: keep-all`.
-7. API 키는 `.env`에만. 커밋하지 않습니다.
+1. 예측 숫자는 `shared/model.ts`에서만 계산합니다. 사본을 만들지 마세요.
+2. **미래 정보 누출 금지.** 거래일 t의 입력은 t 장 시작 전에 알 수 있는 값만. `tests/model.test.ts`가 지킵니다.
+3. **데이터가 없으면 없다고 표시**합니다. 추정치·가짜 뉴스·난수를 실측처럼 보여 주지 않습니다.
+4. Gemini는 시장 배경 문장만 씁니다. 숫자를 만들게 하지 마세요.
+5. 투자 권유 표현 금지. 상승 빨강, 하락 파랑(한국 관례).
+6. 모바일(400px) 먼저. 본문 14px 이상, 터치 44px 이상, 확대 허용, `word-break: keep-all`.
+7. 외부 요청의 User-Agent·URL에 개인 정보(이름, 이메일, 저장소 주소)를 넣지 않습니다.
+8. API 키는 `.env` 또는 Actions 비밀값에만.
 
 ## 확인
 
 ```bash
 npm test && npm run lint && npm run build
+UNIVERSE_KOSPI=5 UNIVERSE_KOSDAQ=3 npm run collect   # 실제 데이터로 빠르게
 ```
+
+이 저장소를 Claude Code 클라우드 세션에서 작업할 때 Node의 fetch가 프록시를 쓰려면 `NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt`를 붙여 실행합니다.

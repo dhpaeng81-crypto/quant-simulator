@@ -1,17 +1,14 @@
-import { DEFAULT_CODES } from "../../shared/catalog";
+const KEY = "watchlist.v2";
 
-const KEY = "watchlist.v1";
-
-/** 관심 종목은 이 브라우저에만 저장합니다 (다른 사용자와 공유되지 않음) */
-export function loadWatchlist(): string[] {
+/** 관심 종목은 이 브라우저에만 저장합니다. 저장된 게 없으면 null */
+export function loadWatchlist(): string[] | null {
   try {
-    const raw = localStorage.getItem(KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
+    const parsed = JSON.parse(localStorage.getItem(KEY) ?? "null");
     if (Array.isArray(parsed) && parsed.every((c) => typeof c === "string" && /^\d{6}$/.test(c))) return parsed;
   } catch {
-    // 저장소를 쓸 수 없는 환경(사생활 보호 모드 등)
+    // 저장소를 쓸 수 없는 환경
   }
-  return [...DEFAULT_CODES];
+  return null;
 }
 
 export function saveWatchlist(codes: string[]) {

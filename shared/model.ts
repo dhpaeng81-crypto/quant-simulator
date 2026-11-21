@@ -1,212 +1,269 @@
-// 예측 점수 공식 — 서버(백테스트)와 화면(실시간 시뮬레이션)이 이 파일 하나를 같이 씁니다.
+// 종목별 다음 거래일 수익률 모델.
 //
-// 주의: 아래 베타(민감도) 값은 데이터로 학습한 값이 아니라 업종 특성을 보고 사람이 정한 값입니다.
-// 이 점수는 "시나리오가 이 종목에 유리한지 불리한지"를 보여 주는 지표이지, 검증된 확률이 아닙니다.
+// - 입력 7개: 직전 미국 거래일의 나스닥·필라델피아 반도체 등락률, 원/달러·WTI 등락률,
+//   전 거래일 외국인·기관 순매수(20일 평균 거래량 대비 %), 전 거래일 수익률
+// - 각 종목마다 최근 1년(250거래일)으로 릿지 회귀를 학습합니다.
+// - 상승 확률 = Φ(기대수익률 / 잔차 표준편차). 하루 주가는 대부분 잡음이라 50% 근처가 정상입니다.
+// - 이 파일은 수집기(학습·백테스트)와 화면(시나리오 계산)이 같이 씁니다.
 
-import type {
-  FactorContribution,
-  Prediction,
-  Scenario,
-  ScenarioReference,
-  SectorKey,
-  SignalLabel,
-  TrajectoryPoint,
+import { correlation, normalCdf, ridge } from "./stats";
+import {
+  FEATURE_KEYS,
+  type Bar,
+  type BacktestDay,
+  type BacktestSummary,
+  type DailyRow,
+  type FeatureKey,
+  type Features,
+  type FittedModel,
+  type ForecastResult,
 } from "./types";
 
-export interface Betas {
-  fx: number;
-  nasdaq: number;
-  foreign: number;
-  semiconductor: number;
-  sentiment: number;
-  oil: number;
+export const TRAIN_WINDOW = 250;
+export const BACKTEST_DAYS = 60;
+export const LAMBDA_RATIO = 0.1; // λ = 0.1 × 학습 일수 (표준화 공간)
+const VOLUME_WINDOW = 20;
+const MAX_DAILY_MOVE = 31; // 가격제한폭(30%)을 넘는 변동 = 액면분할 등 → 학습에서 제외
+
+export const FEATURE_LABELS: Record<FeatureKey, { name: string; hint: string }> = {
+  nasdaq: { name: "나스닥", hint: "직전 미국 거래일 등락률" },
+  sox: { name: "필라델피아 반도체", hint: "직전 미국 거래일 등락률" },
+  fx: { name: "원/달러 환율", hint: "전일 대비 변화율 (+는 원화 약세)" },
+  oil: { name: "WTI 유가", hint: "전일 대비 변화율" },
+  foreign: { name: "외국인 순매수", hint: "전 거래일 순매수량 ÷ 20일 평균 거래량" },
+  institution: { name: "기관 순매수", hint: "전 거래일 순매수량 ÷ 20일 평균 거래량" },
+  prevReturn: { name: "전 거래일 수익률", hint: "이 종목의 직전 거래일 등락률" },
+};
+
+export interface MacroSeries {
+  nasdaq: Bar[];
+  sox: Bar[];
+  fx: Bar[];
+  oil: Bar[];
 }
 
-const DEFAULT_BETAS: Betas = { fx: -0.2, nasdaq: 0.35, foreign: 0.45, semiconductor: 0.05, sentiment: 0.3, oil: -0.1 };
+export interface Sample {
+  date: string;
+  x: Features;
+  y: number; // 그날 수익률 %
+}
 
-export const SECTOR_BETAS: Record<SectorKey, Betas> = {
-  // 반도체: 필라델피아 반도체·외국인·나스닥 민감, 환율 부담은 수출로 일부 상쇄
-  semiconductor: { fx: -0.15, nasdaq: 0.4, foreign: 0.55, semiconductor: 0.75, sentiment: 0.3, oil: -0.1 },
-  // 자동차: 고환율이면 수출 이익 증가, 유가는 비용 부담
-  auto: { fx: 0.45, nasdaq: 0.2, foreign: 0.35, semiconductor: 0.05, sentiment: 0.3, oil: -0.25 },
-  // 인터넷 플랫폼: 금리·환율 민감, 나스닥 동조
-  platform: { fx: -0.55, nasdaq: 0.6, foreign: 0.3, semiconductor: -0.05, sentiment: 0.45, oil: -0.1 },
-  // 이차전지·소재
-  battery: { fx: -0.25, nasdaq: 0.3, foreign: 0.4, semiconductor: 0.15, sentiment: 0.5, oil: -0.15 },
-  // 바이오: 달러 계약 비중, 심리 민감
-  bio: { fx: 0.15, nasdaq: 0.3, foreign: 0.45, semiconductor: -0.1, sentiment: 0.5, oil: -0.1 },
-  // 게임: 해외 매출 비중으로 환율 수혜
-  game: { fx: 0.2, nasdaq: 0.4, foreign: 0.35, semiconductor: 0.0, sentiment: 0.45, oil: -0.05 },
-  default: DEFAULT_BETAS,
-};
+const pct = (a: number, b: number) => (b !== 0 ? (a / b - 1) * 100 : 0);
+const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
 
-export const SECTOR_LABELS: Record<SectorKey, string> = {
-  semiconductor: "반도체",
-  auto: "자동차",
-  platform: "인터넷 플랫폼",
-  battery: "이차전지·소재",
-  bio: "바이오",
-  game: "게임",
-  default: "기타 업종",
-};
+/** date보다 앞선 마지막 봉의 등락률과 그 봉의 날짜. series는 날짜 오름차순 */
+export function changeBefore(series: Bar[], date: string): { change: number; date: string } | null {
+  let lo = 0;
+  let hi = series.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (series[mid].date < date) {
+      idx = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  if (idx < 1) return null;
+  return { change: pct(series[idx].close, series[idx - 1].close), date: series[idx].date };
+}
 
-/** 전일 등락률(모멘텀)의 가중치 */
-export const MOMENTUM_BETA = 0.2;
+const sortBars = (s: Bar[]) => [...s].sort((a, b) => a.date.localeCompare(b.date));
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const round = (v: number, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
+/** rows[i]를 예측할 때 쓸 입력 (i === rows.length 이면 다음 거래일). 값이 모자라면 null */
+function featuresAt(rows: DailyRow[], i: number, macro: MacroSeries, date: string) {
+  if (i < VOLUME_WINDOW + 1) return null;
+  const prev = rows[i - 1];
+  const prev2 = rows[i - 2];
+  if (prev.foreignNet === null || prev.institutionNet === null) return null;
+  let vol = 0;
+  for (let k = i - VOLUME_WINDOW; k < i; k++) vol += rows[k].volume;
+  vol /= VOLUME_WINDOW;
+  if (vol <= 0) return null;
 
-/** 입력값을 대략 -5 ~ +5 범위로 맞춘다 */
-export function normalizeInputs(s: Scenario, ref: ScenarioReference, prevDayChangeRate: number) {
-  const fxPct = ref.usdKrw > 0 ? ((s.usdKrw - ref.usdKrw) / ref.usdKrw) * 100 : 0;
-  const oilPct = ref.oilPrice > 0 ? ((s.oilPrice - ref.oilPrice) / ref.oilPrice) * 100 : 0;
+  const nq = changeBefore(macro.nasdaq, date);
+  const sx = changeBefore(macro.sox, date);
+  const fx = changeBefore(macro.fx, date);
+  const ol = changeBefore(macro.oil, date);
+  if (!nq || !sx || !fx || !ol) return null;
+
+  const prevReturn = pct(prev.close, prev2.close);
+  const x: Features = {
+    nasdaq: nq.change,
+    sox: sx.change,
+    fx: fx.change,
+    oil: ol.change,
+    foreign: (prev.foreignNet / vol) * 100,
+    institution: (prev.institutionNet / vol) * 100,
+    prevReturn,
+  };
+  const asOf: Record<FeatureKey, string> = {
+    nasdaq: nq.date,
+    sox: sx.date,
+    fx: fx.date,
+    oil: ol.date,
+    foreign: prev.date,
+    institution: prev.date,
+    prevReturn: prev.date,
+  };
+  return { x, asOf, suspicious: Math.abs(prevReturn) > MAX_DAILY_MOVE };
+}
+
+/** 원자료 → 학습용 표본 + 다음 거래일 입력 */
+export function buildDataset(rowsIn: DailyRow[], macroIn: MacroSeries) {
+  const rows = [...rowsIn].sort((a, b) => a.date.localeCompare(b.date));
+  const macro: MacroSeries = {
+    nasdaq: sortBars(macroIn.nasdaq),
+    sox: sortBars(macroIn.sox),
+    fx: sortBars(macroIn.fx),
+    oil: sortBars(macroIn.oil),
+  };
+  const samples: Sample[] = [];
+  for (let i = 2; i < rows.length; i++) {
+    const f = featuresAt(rows, i, macro, rows[i].date);
+    if (!f || f.suspicious) continue;
+    const y = pct(rows[i].close, rows[i - 1].close);
+    if (Math.abs(y) > MAX_DAILY_MOVE) continue;
+    samples.push({ date: rows[i].date, x: f.x, y });
+  }
+  // 다음 거래일: 지금까지 나온 값을 모두 사용
+  const next = rows.length > 2 ? featuresAt(rows, rows.length, macro, "9999-12-31") : null;
   return {
-    // 환율·유가는 '오른 정도'를 그대로 입력하고, 좋고 나쁨의 방향은 업종 베타의 부호가 정함
-    // (원본은 입력도 뒤집고 베타에도 부호를 줘서 자동차·유가 효과가 반대로 계산되던 문제가 있었음)
-    // 환율 1% 상승 → +0.9
-    fx: clamp(fxPct * 0.9, -5, 5),
-    nasdaq: clamp(s.nasdaqChange * 2, -5, 5),
-    semiconductor: clamp(s.semiconductorChange * 2, -5, 5),
-    // 유가 1% 상승 → +0.22
-    oil: clamp(oilPct * 0.22, -5, 5),
-    foreign: clamp(s.foreignFlow, -5, 5),
-    sentiment: clamp(s.newsSentiment / 20, -5, 5),
-    momentum: clamp(prevDayChangeRate, -5, 5),
+    samples,
+    latestInputs: next && !next.suspicious ? next.x : null,
+    inputsAsOf: next ? next.asOf : null,
   };
 }
 
-const FACTOR_NAMES: Record<FactorContribution["id"], string> = {
-  foreign: "외국인 수급",
-  nasdaq: "나스닥",
-  semiconductor: "필라델피아 반도체",
-  fx: "원/달러 환율",
-  sentiment: "뉴스 분위기",
-  oil: "국제 유가",
-  momentum: "직전 거래일 흐름",
-};
+const toVec = (f: Features) => FEATURE_KEYS.map((k) => f[k]);
+const fromVec = (v: number[]): Features => Object.fromEntries(FEATURE_KEYS.map((k, i) => [k, v[i]])) as Features;
 
-export function signalFor(direction: "UP" | "DOWN", confidence: number): SignalLabel {
-  if (confidence < 55) return "NEUTRAL";
-  if (direction === "UP") return confidence >= 75 ? "STRONG_UP" : "UP";
-  return confidence >= 75 ? "STRONG_DOWN" : "DOWN";
-}
+export function fitModel(samples: Sample[], lambdaRatio = LAMBDA_RATIO): FittedModel | null {
+  const n = samples.length;
+  if (n < 60) return null;
+  const X = samples.map((s) => toVec(s.x));
+  const y = samples.map((s) => s.y);
+  const lambda = lambdaRatio * n;
+  const { beta, mu, sig, ym } = ridge(X, y, lambda);
 
-export function predict(params: {
-  sector: SectorKey;
-  price: number;
-  prevDayChangeRate: number;
-  scenario: Scenario;
-  reference: ScenarioReference;
-}): Prediction {
-  const b = SECTOR_BETAS[params.sector] ?? DEFAULT_BETAS;
-  const n = normalizeInputs(params.scenario, params.reference, params.prevDayChangeRate);
+  const coef = beta.map((b, j) => (sig[j] > 0 ? b / sig[j] : 0));
+  const intercept = ym - coef.reduce((a, c, j) => a + c * mu[j], 0);
 
-  const raw: Array<[FactorContribution["id"], number, number]> = [
-    ["foreign", b.foreign, n.foreign],
-    ["nasdaq", b.nasdaq, n.nasdaq],
-    ["semiconductor", b.semiconductor, n.semiconductor],
-    ["fx", b.fx, n.fx],
-    ["sentiment", b.sentiment, n.sentiment],
-    ["oil", b.oil, n.oil],
-    ["momentum", MOMENTUM_BETA, n.momentum],
-  ];
-
-  const contributions = raw.map(([id, beta, input]) => ({ id, beta, input, contribution: beta * input }));
-  const score = contributions.reduce((sum, c) => sum + c.contribution, 0);
-  const totalAbs = contributions.reduce((sum, c) => sum + Math.abs(c.contribution), 0);
-
-  const factors: FactorContribution[] = contributions.map((c) => ({
-    id: c.id,
-    name: FACTOR_NAMES[c.id],
-    beta: c.beta,
-    input: round(c.input),
-    contribution: round(c.contribution, 3),
-    share: totalAbs > 0 ? round((Math.abs(c.contribution) / totalAbs) * 100, 1) : 0,
-  }));
-
-  // 기울기 0.5: 평범한 하루(나스닥 ±1%)가 곧바로 "강한 신호"로 표시되지 않도록 완만하게
-  const pUp = 1 / (1 + Math.exp(-0.5 * score));
-  const direction = score >= 0 ? "UP" : "DOWN";
-  const confidence = Math.round(clamp(Math.max(pUp, 1 - pUp) * 100, 50, 90));
+  let sse = 0;
+  let sst = 0;
+  for (let i = 0; i < n; i++) {
+    const pred = intercept + coef.reduce((a, c, j) => a + c * X[i][j], 0);
+    sse += (y[i] - pred) ** 2;
+    sst += (y[i] - ym) ** 2;
+  }
+  const sigma = Math.sqrt(sse / Math.max(1, n - FEATURE_KEYS.length - 1));
 
   return {
-    score: round(score, 3),
-    direction,
-    pUp: round(pUp, 3),
-    confidence,
-    signal: signalFor(direction, confidence),
-    factors,
-    trajectory: extrapolate(params.price, score),
+    intercept: round(intercept),
+    coef: fromVec(coef.map((c) => round(c, 5))),
+    mean: fromVec(mu.map((m) => round(m))),
+    sd: fromVec(sig.map((s) => round(s))),
+    sigma: round(sigma),
+    n,
+    r2: round(sst > 0 ? 1 - sse / sst : 0),
+    trainStart: samples[0].date,
+    trainEnd: samples[n - 1].date,
+    lambda: round(lambda, 2),
   };
 }
 
-/**
- * 점수를 5거래일로 단순 외삽한 '시나리오 경로'. 영향이 하루 15%씩 줄어든다고 가정.
- * 가격 예측이 아니라 점수의 크기를 가격 단위로 보여 주는 참고선.
- */
-export function extrapolate(price: number, score: number): TrajectoryPoint[] {
-  const points: TrajectoryPoint[] = [];
-  let p = price;
-  for (let i = 0; i < 5; i++) {
-    const daily = clamp(score * (1 - i * 0.15) * 0.5, -10, 10);
-    p = p * (1 + daily / 100);
-    points.push({
-      day: `D+${i + 1}`,
-      dailyChangeRate: round(daily),
-      cumulativeChangeRate: round((p / price - 1) * 100),
-      price: Math.round(p),
+export function forecast(model: FittedModel, x: Features): ForecastResult {
+  let expected = model.intercept;
+  const contributions = {} as Features;
+  for (const k of FEATURE_KEYS) {
+    expected += model.coef[k] * x[k];
+    // 평균적인 날과 비교해 이 입력이 더한 몫
+    contributions[k] = round(model.coef[k] * (x[k] - model.mean[k]));
+  }
+  const pUp = model.sigma > 0 ? normalCdf(expected / model.sigma) : 0.5;
+  return { expectedReturn: round(expected), pUp: round(pUp), contributions };
+}
+
+/** 워크포워드 백테스트: 매일 '그 전 250일'로만 학습해서 그날을 예측 */
+export function walkForward(samples: Sample[], testDays = BACKTEST_DAYS, window = TRAIN_WINDOW): BacktestSummary | null {
+  const start = Math.max(60, samples.length - testDays);
+  const days: BacktestDay[] = [];
+  for (let i = start; i < samples.length; i++) {
+    const model = fitModel(samples.slice(Math.max(0, i - window), i));
+    if (!model) continue;
+    const f = forecast(model, samples[i].x);
+    const actual = samples[i].y;
+    days.push({
+      date: samples[i].date,
+      actualReturn: round(actual, 2),
+      expectedReturn: round(f.expectedReturn, 3),
+      pUp: round(f.pUp, 3),
+      hit: actual === 0 ? null : f.pUp >= 0.5 === actual > 0,
     });
   }
-  return points;
+  if (days.length === 0) return null;
+
+  const evaluated = days.filter((d) => d.hit !== null);
+  const hits = evaluated.filter((d) => d.hit).length;
+  const ups = evaluated.filter((d) => d.actualReturn > 0).length;
+  const n = evaluated.length;
+
+  // 적중률이 50%와 다른지: 정규 근사 양측 p값
+  let pValue: number | null = null;
+  if (n >= 10) {
+    const z = (hits - n / 2) / Math.sqrt(n / 4);
+    pValue = round(2 * (1 - normalCdf(Math.abs(z))), 3);
+  }
+
+  let hold = 1;
+  let strat = 1;
+  for (const d of days) {
+    hold *= 1 + d.actualReturn / 100;
+    if (d.pUp >= 0.5) strat *= 1 + d.actualReturn / 100;
+  }
+
+  const corr = correlation(
+    days.map((d) => d.expectedReturn),
+    days.map((d) => d.actualReturn),
+  );
+
+  return {
+    days,
+    evaluated: n,
+    hits,
+    hitRate: n ? round((hits / n) * 100, 1) : null,
+    alwaysUpHitRate: n ? round((ups / n) * 100, 1) : null,
+    pValue,
+    correlation: corr === null ? null : round(corr, 3),
+    strategyReturn: round((strat - 1) * 100, 2),
+    holdReturn: round((hold - 1) * 100, 2),
+    trainWindow: window,
+  };
 }
 
-/** 프리셋: 기준값(오늘 시세)에 더하는 변화량 */
-export interface Preset {
-  id: string;
-  name: string;
-  description: string;
-  apply: (base: Scenario) => Scenario;
-}
-
-export const PRESETS: Preset[] = [
+/** 시나리오 프리셋: 실제 입력값 중 일부를 바꿈 */
+export const PRESETS: Array<{ id: string; name: string; description: string; apply: (x: Features) => Features }> = [
   {
     id: "tech-rally",
-    name: "기술주 강세",
-    description: "나스닥·반도체 상승, 원화 강세, 외국인 순매수",
-    apply: (s) => ({ ...s, nasdaqChange: 2, semiconductorChange: 2.5, usdKrw: s.usdKrw - 10, foreignFlow: 3, newsSentiment: 40 }),
+    name: "미국 기술주 강세",
+    description: "나스닥 +2%, 반도체 +3%, 원화 강세",
+    apply: (x) => ({ ...x, nasdaq: 2, sox: 3, fx: -0.5 }),
   },
   {
-    id: "fx-outflow",
-    name: "고환율·외국인 매도",
-    description: "환율 급등, 외국인 대량 순매도, 심리 악화",
-    apply: (s) => ({ ...s, usdKrw: s.usdKrw + 30, foreignFlow: -4, nasdaqChange: -0.5, newsSentiment: -30 }),
+    id: "risk-off",
+    name: "위험 회피",
+    description: "나스닥 −2.5%, 반도체 −4%, 환율 +1%",
+    apply: (x) => ({ ...x, nasdaq: -2.5, sox: -4, fx: 1 }),
   },
   {
-    id: "chip-cycle",
-    name: "반도체 호황",
-    description: "반도체 지수 급등, 외국인 매수 집중",
-    apply: (s) => ({ ...s, semiconductorChange: 4, nasdaqChange: 1.5, foreignFlow: 4, newsSentiment: 50 }),
+    id: "foreign-buy",
+    name: "외국인 대량 매수",
+    description: "전일 외국인 순매수가 평소 거래량의 10%",
+    apply: (x) => ({ ...x, foreign: 10 }),
   },
   {
-    id: "cost-shock",
-    name: "비용 충격",
-    description: "유가·환율 동반 상승, 미국 증시 약세",
-    apply: (s) => ({
-      ...s,
-      oilPrice: s.oilPrice + 12,
-      usdKrw: s.usdKrw + 20,
-      nasdaqChange: -1.5,
-      semiconductorChange: -2,
-      foreignFlow: -2,
-      newsSentiment: -40,
-    }),
+    id: "oil-shock",
+    name: "유가 급등",
+    description: "WTI +6%, 환율 +0.8%",
+    apply: (x) => ({ ...x, oil: 6, fx: 0.8 }),
   },
 ];
-
-export const SIGNAL_TEXT: Record<SignalLabel, string> = {
-  STRONG_UP: "강한 상승 신호",
-  UP: "상승 신호",
-  NEUTRAL: "뚜렷한 신호 없음",
-  DOWN: "하락 신호",
-  STRONG_DOWN: "강한 하락 신호",
-};

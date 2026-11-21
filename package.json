@@ -3,11 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "한국 주식 매크로 시나리오 시뮬레이터 (규칙 기반 점수 + 실데이터 백테스트)",
+  "description": "한국 대형주 다음 거래일 전망 — 실데이터로 학습한 회귀 모델과 워크포워드 백테스트 (정적 사이트)",
   "scripts": {
-    "dev": "tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/index.js",
-    "start": "NODE_ENV=production node dist-server/index.js",
+    "dev": "vite",
+    "collect": "tsx scripts/collect.ts",
+    "build": "vite build",
+    "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
@@ -16,15 +17,12 @@
   },
   "dependencies": {
     "@google/genai": "^3.6.1",
-    "dotenv": "^18.0.10",
-    "express": "^4.22.3",
     "lucide-react": "^1.77.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
-    "@types/express": "^4.17.25",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

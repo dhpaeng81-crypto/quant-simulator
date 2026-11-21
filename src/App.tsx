@@ -1,322 +1,150 @@
-import { BarChart3, List, RefreshCw, SlidersHorizontal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { predict } from "../shared/model";
-import type {
-  BacktestResult,
-  Commentary,
-  MacroValue,
-  Narrative,
-  NewsItem,
-  Prediction,
-  Scenario,
-  ScenarioReference,
-  Stock,
-  StockWithQuote,
-} from "../shared/types";
+import { AlertTriangle, BarChart3, List, SlidersHorizontal } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { FEATURE_LABELS, forecast } from "../shared/model";
+import { FEATURE_KEYS, type Features, type IndexFile, type StockDetail } from "../shared/types";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { BriefingCard } from "./components/BriefingCard";
-import { ReportPanel } from "./components/ReportPanel";
+import { ForecastPanel } from "./components/ForecastPanel";
 import { ScenarioPanel } from "./components/ScenarioPanel";
+import { StockList } from "./components/StockList";
 import { TickerBar } from "./components/TickerBar";
-import { Watchlist } from "./components/Watchlist";
-import { api } from "./lib/api";
+import { loadIndex, loadStock } from "./lib/data";
+import { dateTimeKo } from "./lib/format";
 import { loadWatchlist, saveWatchlist } from "./lib/storage";
-
-// 실시간 지표를 못 가져왔을 때 쓰는 임시 기준값 (화면에 '임시'라고 표시)
-const FALLBACK = { usdKrw: 1400, oilPrice: 70 };
 
 type MobileTab = "stocks" | "scenario" | "report";
 
-function deriveLive(macro: MacroValue[]): { live: Scenario; reference: ScenarioReference; available: boolean } {
-  const get = (id: MacroValue["id"]) => macro.find((m) => m.id === id);
-  const fx = get("usdkrw");
-  const oil = get("oil");
-  const nq = get("nasdaq");
-  const sox = get("sox");
-  const r1 = (v: number) => Math.round(v * 10) / 10;
-  return {
-    live: {
-      usdKrw: fx?.value ? Math.round(fx.value) : FALLBACK.usdKrw,
-      oilPrice: oil?.value ? r1(oil.value) : FALLBACK.oilPrice,
-      nasdaqChange: nq?.changeRate != null ? r1(nq.changeRate) : 0,
-      semiconductorChange: sox?.changeRate != null ? r1(sox.changeRate) : 0,
-      foreignFlow: 0,
-      newsSentiment: 0,
-    },
-    reference: {
-      usdKrw: fx?.previousClose ?? fx?.value ?? FALLBACK.usdKrw,
-      oilPrice: oil?.previousClose ?? oil?.value ?? FALLBACK.oilPrice,
-    },
-    available: Boolean(fx?.value && oil?.value && nq?.changeRate != null && sox?.changeRate != null),
-  };
-}
+const codeFromHash = () => /^#(\d{6})$/.exec(window.location.hash)?.[1] ?? null;
 
 export default function App() {
-  const [codes, setCodes] = useState<string[]>(loadWatchlist);
-  const [stocks, setStocks] = useState<StockWithQuote[]>([]);
-  const [stocksLoading, setStocksLoading] = useState(true);
-  const [stocksError, setStocksError] = useState<string | null>(null);
-  const [macro, setMacro] = useState<MacroValue[]>([]);
-  const [macroLoading, setMacroLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selected, setSelected] = useState<string | null>(() => loadWatchlist()[0] ?? null);
-
-  const { live, reference, available } = useMemo(() => deriveLive(macro), [macro]);
-  const [scenario, setScenario] = useState<Scenario>(live);
-  const touched = useRef(false);
-
-  const [tab, setTab] = useState<"prediction" | "backtest">("prediction");
+  const [index, setIndex] = useState<IndexFile | null>(null);
+  const [indexError, setIndexError] = useState<string | null>(null);
+  const [watchlist, setWatchlist] = useState<string[] | null>(loadWatchlist);
+  const [selected, setSelected] = useState<string | null>(codeFromHash);
+  const [detail, setDetail] = useState<StockDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [scenario, setScenario] = useState<Features | null>(null);
+  const [tab, setTab] = useState<"forecast" | "backtest">("forecast");
   const [mobileTab, setMobileTab] = useState<MobileTab>("report");
 
-  const [narrative, setNarrative] = useState<Narrative | null>(null);
-  const [narrativeLoading, setNarrativeLoading] = useState(false);
-  const [narrativeError, setNarrativeError] = useState<string | null>(null);
-  const [news, setNews] = useState<{ enabled: boolean; items: NewsItem[] } | null>(null);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const [backtest, setBacktest] = useState<BacktestResult | null>(null);
-  const [backtestLoading, setBacktestLoading] = useState(false);
-  const [backtestError, setBacktestError] = useState<string | null>(null);
-  const [backtestNonce, setBacktestNonce] = useState(0);
-  const [commentary, setCommentary] = useState<Commentary | null>(null);
-  const [commentaryEnabled, setCommentaryEnabled] = useState<boolean | null>(null);
-  const [commentaryLoading, setCommentaryLoading] = useState(true);
-
-  // 관심 종목 저장
-  useEffect(() => saveWatchlist(codes), [codes]);
-
-  // 시세
-  const loadStocks = useCallback(async (list: string[], refresh = false) => {
-    if (list.length === 0) {
-      setStocks([]);
-      setStocksLoading(false);
-      return;
-    }
-    setStocksLoading(true);
-    try {
-      const data = await api.stocks(list, refresh);
-      const order = new Map(list.map((c, i) => [c, i]));
-      setStocks(data.sort((a, b) => (order.get(a.code) ?? 0) - (order.get(b.code) ?? 0)));
-      setStocksError(null);
-    } catch (e) {
-      setStocksError((e as Error).message);
-    } finally {
-      setStocksLoading(false);
-    }
-  }, []);
-
-  const loadMacro = useCallback(async (refresh = false) => {
-    setMacroLoading(true);
-    try {
-      setMacro(await api.macro(refresh));
-    } catch {
-      // 지표 없이도 화면은 동작 (임시 기준값 사용)
-    } finally {
-      setMacroLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    loadMacro();
-    loadStocks(codes);
-    api
-      .commentary()
-      .then((r) => {
-        setCommentary(r.commentary);
-        setCommentaryEnabled(r.enabled);
+    loadIndex()
+      .then((idx) => {
+        setIndex(idx);
+        const codes = new Set(idx.stocks.map((s) => s.code));
+        // 처음 방문: 코스피 시가총액 상위 10개
+        setWatchlist((prev) =>
+          prev
+            ? prev.filter((c) => codes.has(c))
+            : idx.stocks
+                .filter((s) => s.market === "KOSPI")
+                .sort((a, b) => a.rank - b.rank)
+                .slice(0, 10)
+                .map((s) => s.code),
+        );
+        setSelected((cur) =>
+          cur && codes.has(cur) ? cur : (idx.stocks.find((s) => s.market === "KOSPI" && s.rank === 1)?.code ?? idx.stocks[0]?.code ?? null),
+        );
       })
-      .catch(() => setCommentaryEnabled(true))
-      .finally(() => setCommentaryLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch((e) => setIndexError((e as Error).message));
+    const onHash = () => {
+      const c = codeFromHash();
+      if (c) setSelected(c);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  // 지표가 도착하면, 사용자가 아직 손대지 않았을 때만 시나리오를 오늘 값으로 맞춤
   useEffect(() => {
-    if (!touched.current) setScenario(live);
-  }, [live]);
+    if (watchlist) saveWatchlist(watchlist);
+  }, [watchlist]);
 
-  const changeScenario = (s: Scenario) => {
-    touched.current = true;
-    setScenario(s);
-  };
-
-  // 화면에서 즉시 계산 (서버 백테스트와 같은 공식)
-  const predictions = useMemo(() => {
-    const out: Record<string, Prediction | null> = {};
-    for (const s of stocks) {
-      out[s.code] = s.quote
-        ? predict({ sector: s.sector, price: s.quote.price, prevDayChangeRate: s.quote.changeRate, scenario, reference })
-        : null;
-    }
-    return out;
-  }, [stocks, scenario, reference]);
-
-  const current = stocks.find((s) => s.code === selected) ?? null;
-  const currentPrediction = current ? predictions[current.code] : null;
-
-  // 선택 종목이 목록에서 사라지면 첫 종목으로
-  useEffect(() => {
-    if (stocks.length && !stocks.some((s) => s.code === selected)) setSelected(stocks[0].code);
-  }, [stocks, selected]);
-
-  // 해설: 슬라이더를 멈추고 0.8초 뒤 요청
-  useEffect(() => {
-    if (!current?.quote) return;
-    let cancelled = false;
-    setNarrativeLoading(true);
-    const t = window.setTimeout(async () => {
-      try {
-        const n = await api.narrative(current.code, scenario, reference);
-        if (!cancelled) {
-          setNarrative(n);
-          setNarrativeError(null);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setNarrative(null);
-          setNarrativeError((e as Error).message);
-        }
-      } finally {
-        if (!cancelled) setNarrativeLoading(false);
-      }
-    }, 800);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [current?.code, current?.quote, scenario, reference]);
-
-  // 뉴스
   useEffect(() => {
     if (!selected) return;
+    if (window.location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
     let cancelled = false;
-    setNewsLoading(true);
-    api
-      .news(selected)
-      .then((r) => !cancelled && setNews(r))
-      .catch(() => !cancelled && setNews({ enabled: true, items: [] }))
-      .finally(() => !cancelled && setNewsLoading(false));
+    setDetailError(null);
+    loadStock(selected)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+        setScenario(d.latestInputs);
+      })
+      .catch((e) => !cancelled && setDetailError((e as Error).message));
     return () => {
       cancelled = true;
     };
   }, [selected]);
 
-  // 백테스트 (탭을 열었을 때만)
-  useEffect(() => {
-    if (tab !== "backtest" || !selected) return;
-    let cancelled = false;
-    setBacktestLoading(true);
-    setBacktestError(null);
-    api
-      .backtest(selected)
-      .then((r) => !cancelled && setBacktest(r))
-      .catch((e) => {
-        if (!cancelled) {
-          setBacktest(null);
-          setBacktestError((e as Error).message);
-        }
-      })
-      .finally(() => !cancelled && setBacktestLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, selected, backtestNonce]);
+  const current = detail && detail.code === selected ? detail : null;
+  const result = useMemo(() => (current?.model && scenario ? forecast(current.model, scenario) : null), [current, scenario]);
+  const isScenario = Boolean(current?.latestInputs && scenario && FEATURE_KEYS.some((k) => scenario[k] !== current.latestInputs![k]));
+  const outliers =
+    current?.model && scenario
+      ? FEATURE_KEYS.filter((k) => current.model!.sd[k] > 0 && Math.abs((scenario[k] - current.model!.mean[k]) / current.model!.sd[k]) > 3)
+      : [];
 
-  const refreshAll = async () => {
-    setRefreshing(true);
-    await Promise.all([loadMacro(true), loadStocks(codes, true)]);
-    setRefreshing(false);
-  };
-
-  const refreshCommentary = async () => {
-    setCommentaryLoading(true);
-    try {
-      const r = await api.commentary(true);
-      setCommentary(r.commentary ?? commentary);
-      setCommentaryEnabled(r.enabled);
-    } finally {
-      setCommentaryLoading(false);
-    }
-  };
-
-  const addStock = (s: Stock) => {
-    if (codes.includes(s.code)) return;
-    const next = [...codes, s.code];
-    setCodes(next);
-    setSelected(s.code);
-    loadStocks(next);
-  };
-
-  const removeStock = (code: string) => {
-    const next = codes.filter((c) => c !== code);
-    setCodes(next);
-    setStocks((prev) => prev.filter((s) => s.code !== code));
-  };
-
-  const selectStock = (code: string) => {
+  const select = (code: string) => {
     setSelected(code);
     setMobileTab("report");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
+  const add = (code: string) => setWatchlist((w) => (w && !w.includes(code) ? [...w, code] : w));
+  const remove = (code: string) => setWatchlist((w) => (w ? w.filter((c) => c !== code) : w));
   const hidden = (t: MobileTab) => (mobileTab === t ? "" : "hidden lg:block");
+
+  if (indexError) {
+    return (
+      <main className="mx-auto max-w-xl p-6 text-[15px]">
+        <h1 className="text-xl font-bold">데이터를 불러오지 못했습니다</h1>
+        <p className="mt-2 text-slate-600">{indexError} 잠시 후 새로고침해 주세요.</p>
+      </main>
+    );
+  }
+  if (!index || !watchlist) {
+    return <main className="p-6 text-[15px] text-slate-600">불러오는 중…</main>;
+  }
 
   return (
     <div className="min-h-dvh pb-20 lg:pb-0">
-      <TickerBar macro={macro} loading={macroLoading} />
+      <TickerBar macro={index.macro} />
 
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-bold sm:text-xl">매크로 시나리오 시뮬레이터</h1>
-            <p className="hidden text-sm text-slate-500 sm:block">환율·미국 증시·유가가 한국 대형주에 어떻게 작용하는지 계산해 봅니다</p>
-          </div>
-          <button
-            type="button"
-            onClick={refreshAll}
-            disabled={refreshing}
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60"
-          >
-            <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
-            시세 새로고침
-          </button>
+        <div className="mx-auto max-w-7xl px-4 py-3">
+          <h1 className="text-lg font-bold sm:text-xl">다음 거래일 전망</h1>
+          <p className="text-sm text-slate-500">
+            시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
+          </p>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-4">
         <div className={hidden("report")}>
-          <BriefingCard enabled={commentaryEnabled} commentary={commentary} loading={commentaryLoading} onRefresh={refreshCommentary} />
+          <BriefingCard briefing={index.briefing} note={index.nextTradingDayNote} />
         </div>
-
-        {stocksError && (
-          <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">
-            시세를 불러오지 못했습니다: {stocksError}
-          </p>
-        )}
 
         <div className="grid gap-4 lg:grid-cols-12">
           <div className="min-w-0 space-y-4 lg:col-span-5">
             <div className={hidden("stocks")}>
-              <Watchlist
-                stocks={stocks}
-                loading={stocksLoading}
-                selected={selected}
-                predictions={predictions}
-                onSelect={selectStock}
-                onAdd={addStock}
-                onRemove={removeStock}
-              />
+              <StockList universe={index.stocks} watchlist={watchlist} selected={selected} onSelect={select} onAdd={add} onRemove={remove} />
             </div>
             <div className={hidden("scenario")}>
-              <ScenarioPanel scenario={scenario} live={live} reference={reference} liveAvailable={available} onChange={changeScenario} />
+              {current?.model && current.latestInputs && scenario ? (
+                <ScenarioPanel model={current.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 text-[15px] text-slate-600">
+                  {current ? "이 종목은 시나리오를 계산할 모델이 없습니다." : "종목을 고르면 시나리오를 바꿔 볼 수 있습니다."}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className={`min-w-0 lg:col-span-7 ${hidden("report")}`}>
-            <div role="tablist" aria-label="보기 선택" className="mb-4 grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
+          <div className={`min-w-0 space-y-4 lg:col-span-7 ${hidden("report")}`}>
+            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
               {(
                 [
-                  ["prediction", "시나리오 결과"],
-                  ["backtest", "과거 검증"],
+                  ["forecast", "전망"],
+                  ["backtest", "과거 성적"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -332,35 +160,31 @@ export default function App() {
               ))}
             </div>
 
-            {tab === "prediction" &&
-              (current && currentPrediction ? (
-                <ReportPanel
-                  stock={current}
-                  prediction={currentPrediction}
-                  narrative={narrative}
-                  narrativeLoading={narrativeLoading}
-                  narrativeError={narrativeError}
-                  news={news}
-                  newsLoading={newsLoading}
-                />
-              ) : (
-                <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">
-                  {stocksLoading ? "불러오는 중…" : current ? "이 종목의 시세를 가져오지 못해 계산할 수 없습니다." : "종목을 선택해 주세요."}
-                </div>
-              ))}
-            {tab === "backtest" && (
-              <BacktestPanel data={backtest} loading={backtestLoading} error={backtestError} onRetry={() => setBacktestNonce((n) => n + 1)} />
+            {detailError && <p className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">{detailError}</p>}
+            {!current && !detailError && <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">불러오는 중…</div>}
+
+            {current && tab === "forecast" && (
+              <>
+                {outliers.length > 0 && (
+                  <div role="note" className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-950">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    <p>
+                      {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의
+                      학습하지 못해 확률이 과장될 수 있습니다.
+                    </p>
+                  </div>
+                )}
+                <ForecastPanel stock={current} result={result} isScenario={isScenario} />
+              </>
             )}
+            {current && tab === "backtest" && <BacktestPanel data={current.backtest} name={current.name} />}
           </div>
         </div>
       </main>
 
       <footer className="mx-auto max-w-7xl px-4 pt-4 pb-8 text-sm leading-relaxed text-slate-500">
-        <p>
-          이 서비스는 사람이 정한 업종별 가중치로 점수를 내는 학습·참고용 시뮬레이터입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은
-          투자자 본인에게 있습니다.
-        </p>
-        <p className="mt-1">시세: Yahoo Finance(지연될 수 있음) · 뉴스: 네이버 검색 · 해설·브리핑: Google Gemini</p>
+        <p>종목마다 최근 1년 데이터로 학습한 통계 모델의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
+        <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 하루 두 번 갱신.</p>
       </footer>
 
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="화면 전환">
@@ -369,7 +193,7 @@ export default function App() {
             [
               ["stocks", "종목", List],
               ["scenario", "시나리오", SlidersHorizontal],
-              ["report", "결과", BarChart3],
+              ["report", "전망", BarChart3],
             ] as const
           ).map(([key, label, Icon]) => (
             <button
