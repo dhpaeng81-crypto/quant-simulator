@@ -33,19 +33,21 @@ export async function topByMarketValue(market: Market, count: number): Promise<R
 }
 
 /** 일봉 (종가·거래량). symbol은 종목코드 또는 KOSPI/KOSDAQ */
-export async function dailyPrices(symbol: string, count = 600): Promise<Array<{ date: string; close: number; volume: number }>> {
+export async function dailyPrices(symbol: string, count = 600): Promise<Array<{ date: string; open: number; close: number; volume: number }>> {
   const xml = await getText(`https://fchart.stock.naver.com/sise.nhn?symbol=${symbol}&timeframe=day&count=${count}&requestType=0`);
-  const out: Array<{ date: string; close: number; volume: number }> = [];
+  const out: Array<{ date: string; open: number; close: number; volume: number }> = [];
   for (const m of xml.matchAll(/<item data="(\d{8})\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^"]*)"/g)) {
+    const open = Number(m[2]);
     const close = Number(m[5]);
     const volume = Number(m[6]);
-    if (Number.isFinite(close) && close > 0) out.push({ date: ymd(m[1]), close, volume: Number.isFinite(volume) ? volume : 0 });
+    if (Number.isFinite(close) && close > 0)
+      out.push({ date: ymd(m[1]), open: Number.isFinite(open) ? open : 0, close, volume: Number.isFinite(volume) ? volume : 0 });
   }
   return out;
 }
 
 /** 일별 외국인·기관 순매수 수량. pages × 60거래일 */
-export async function investorFlows(code: string, pages = 7): Promise<Map<string, { foreign: number; institution: number }>> {
+export async function investorFlows(code: string, pages = 10): Promise<Map<string, { foreign: number; institution: number }>> {
   const map = new Map<string, { foreign: number; institution: number }>();
   let cursor: string | null = null;
   for (let p = 0; p < pages; p++) {
@@ -67,7 +69,7 @@ export async function stockRows(code: string): Promise<DailyRow[]> {
   const [prices, flows] = await Promise.all([dailyPrices(code), investorFlows(code)]);
   return prices.map((p) => {
     const f = flows.get(p.date);
-    return { date: p.date, close: p.close, volume: p.volume, foreignNet: f?.foreign ?? null, institutionNet: f?.institution ?? null };
+    return { date: p.date, open: p.open, close: p.close, volume: p.volume, foreignNet: f?.foreign ?? null, institutionNet: f?.institution ?? null };
   });
 }
 

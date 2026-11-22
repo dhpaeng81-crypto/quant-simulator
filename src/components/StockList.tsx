@@ -13,11 +13,11 @@ interface Props {
 }
 
 type View = "watch" | "all";
-type Sort = "rank" | "pUp" | "hit";
+type Sort = "rank" | "pUp" | "gap" | "hit";
 
 export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRemove }: Props) {
   const [view, setView] = useState<View>("watch");
-  const [sort, setSort] = useState<Sort>("pUp");
+  const [sort, setSort] = useState<Sort>("gap");
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -34,6 +34,7 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
   } else {
     rows = [...universe].sort((a, b) => {
       if (sort === "pUp") return (b.pUp ?? -1) - (a.pUp ?? -1);
+      if (sort === "gap") return (b.gapPUp ?? -1) - (a.gapPUp ?? -1);
       if (sort === "hit") return (b.hitRate ?? -1) - (a.hitRate ?? -1);
       return b.marketValue - a.marketValue;
     });
@@ -133,7 +134,8 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
               onChange={(e) => setSort(e.target.value as Sort)}
               className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 text-[15px]"
             >
-              <option value="pUp">상승 확률 높은 순</option>
+              <option value="gap">시가 상승 확률 높은 순</option>
+              <option value="pUp">종가 상승 확률 높은 순</option>
               <option value="hit">과거 적중률 높은 순</option>
               <option value="rank">시가총액 순</option>
             </select>
@@ -144,7 +146,7 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
       <div className="mt-3 flex border-y border-slate-100 bg-slate-50 px-4 py-1.5 text-xs text-slate-600">
         <span className="flex-1">종목</span>
         <span className="w-24 text-right">종가</span>
-        <span className="w-16 text-right" title="다음 거래일 상승 확률">상승확률</span>
+        <span className="w-16 text-right" title="다음 거래일 상승 확률: 위 시가, 아래 종가">시가·종가</span>
         <span className="w-11" aria-hidden />
       </div>
       <ul className="divide-y divide-slate-100">
@@ -170,8 +172,11 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
                   <span className="num block text-[15px] font-semibold">{won(s.close)}</span>
                   <span className={`num block text-sm ${toneText(s.changeRate)}`}>{pct(s.changeRate)}</span>
                 </span>
-                <span className={`num w-16 text-right text-[15px] font-semibold ${s.pUp === null ? "text-slate-400" : toneProb(s.pUp)}`}>
-                  {s.pUp === null ? "—" : prob(s.pUp)}
+                <span className="num w-16 text-right">
+                  <span className={`block text-[15px] font-semibold ${s.gapPUp === null ? "text-slate-400" : toneProb(s.gapPUp)}`}>
+                    {s.gapPUp === null ? "—" : prob(s.gapPUp)}
+                  </span>
+                  <span className={`block text-sm ${s.pUp === null ? "text-slate-400" : toneProb(s.pUp)}`}>{s.pUp === null ? "—" : prob(s.pUp)}</span>
                 </span>
               </button>
               {view === "watch" ? (

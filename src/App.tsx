@@ -1,9 +1,10 @@
 import { AlertTriangle, BarChart3, List, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { FEATURE_LABELS, forecast } from "../shared/model";
-import { FEATURE_KEYS, type Features, type IndexFile, type StockDetail } from "../shared/types";
+import { FEATURE_KEYS, TARGETS, type Features, type ForecastResult, type IndexFile, type StockDetail, type Target } from "../shared/types";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { BriefingCard } from "./components/BriefingCard";
+import { EvaluationPanel } from "./components/EvaluationPanel";
 import { ForecastPanel } from "./components/ForecastPanel";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { StockList } from "./components/StockList";
@@ -24,7 +25,7 @@ export default function App() {
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<Features | null>(null);
-  const [tab, setTab] = useState<"forecast" | "backtest">("forecast");
+  const [tab, setTab] = useState<"forecast" | "backtest" | "evaluation">("forecast");
   const [mobileTab, setMobileTab] = useState<MobileTab>("report");
 
   useEffect(() => {
@@ -77,12 +78,23 @@ export default function App() {
   }, [selected]);
 
   const current = detail && detail.code === selected ? detail : null;
-  const result = useMemo(() => (current?.model && scenario ? forecast(current.model, scenario) : null), [current, scenario]);
+  const results = useMemo(() => {
+    const out = {} as Record<Target, ForecastResult | null>;
+    for (const t of TARGETS) {
+      const m = current?.[t].model;
+      out[t] = m && scenario ? forecast(m, scenario, index?.calibration[t] ?? null) : null;
+    }
+    return out;
+  }, [current, scenario, index]);
   const isScenario = Boolean(current?.latestInputs && scenario && FEATURE_KEYS.some((k) => scenario[k] !== current.latestInputs![k]));
-  const outliers =
-    current?.model && scenario
-      ? FEATURE_KEYS.filter((k) => current.model!.sd[k] > 0 && Math.abs((scenario[k] - current.model!.mean[k]) / current.model!.sd[k]) > 3)
-      : [];
+  // 학습 기간 평균에서 3 표준편차 넘게 벗어난 입력 (이 모델이 실제로 쓰는 입력만)
+  const outliers = FEATURE_KEYS.filter((k) =>
+    TARGETS.some((t) => {
+      const m = current?.[t].model;
+      return Boolean(m && scenario && m.coef[k] !== 0 && m.sd[k] > 0 && Math.abs(scenario[k] - m.mean[k]) > 3 * m.sd[k]);
+    }),
+  );
+  const anyClipped = Boolean(results.close?.clipped.length || results.gap?.clipped.length);
 
   const select = (code: string) => {
     setSelected(code);
@@ -129,8 +141,8 @@ export default function App() {
               <StockList universe={index.stocks} watchlist={watchlist} selected={selected} onSelect={select} onAdd={add} onRemove={remove} />
             </div>
             <div className={hidden("scenario")}>
-              {current?.model && current.latestInputs && scenario ? (
-                <ScenarioPanel model={current.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
+              {current?.close.model && current.latestInputs && scenario ? (
+                <ScenarioPanel model={current.close.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-white p-4 text-[15px] text-slate-600">
                   {current ? "이 종목은 시나리오를 계산할 모델이 없습니다." : "종목을 고르면 시나리오를 바꿔 볼 수 있습니다."}
@@ -140,11 +152,12 @@ export default function App() {
           </div>
 
           <div className={`min-w-0 space-y-4 lg:col-span-7 ${hidden("report")}`}>
-            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
+            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-3 rounded-xl border border-slate-200 bg-white p-1">
               {(
                 [
                   ["forecast", "전망"],
                   ["backtest", "과거 성적"],
+                  ["evaluation", "모델 성적표"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -160,8 +173,9 @@ export default function App() {
               ))}
             </div>
 
-            {detailError && <p className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">{detailError}</p>}
-            {!current && !detailError && <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">불러오는 중…</div>}
+            {tab === "evaluation" && <EvaluationPanel />}
+            {tab !== "evaluation" && detailError && <p className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">{detailError}</p>}
+            {tab !== "evaluation" && !current && !detailError && <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">불러오는 중…</div>}
 
             {current && tab === "forecast" && (
               <>
@@ -170,20 +184,20 @@ export default function App() {
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                     <p>
                       {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의
-                      학습하지 못해 확률이 과장될 수 있습니다.
+                      학습하지 못해 확률이 실제보다 극단적으로 나올 수 있습니다{anyClipped ? " (너무 큰 값은 상한까지만 반영)" : ""}.
                     </p>
                   </div>
                 )}
-                <ForecastPanel stock={current} result={result} isScenario={isScenario} />
+                <ForecastPanel stock={current} results={results} isScenario={isScenario} />
               </>
             )}
-            {current && tab === "backtest" && <BacktestPanel data={current.backtest} name={current.name} />}
+            {current && tab === "backtest" && <BacktestPanel stock={current} />}
           </div>
         </div>
       </main>
 
       <footer className="mx-auto max-w-7xl px-4 pt-4 pb-8 text-sm leading-relaxed text-slate-500">
-        <p>종목마다 최근 1년 데이터로 학습한 통계 모델의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
+        <p>최근 1년 데이터로 학습한 통계 모델({index.model.name})의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
         <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 하루 두 번 갱신.</p>
       </footer>
 

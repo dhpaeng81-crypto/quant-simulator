@@ -2,8 +2,8 @@ import type { DailyRow } from "../../shared/types";
 import { shortDate, won } from "../lib/format";
 
 const W = 600;
-const H = 220;
-const PAD = { top: 16, right: 64, bottom: 28, left: 8 };
+const H = 240;
+const PAD = { top: 16, right: 96, bottom: 36, left: 8 };
 
 /** 최근 종가와 다음 거래일 예상 범위(기대값 ± 표준편차 1개, 약 68%) */
 export function PriceChart({ history, expectedReturn, sigma }: { history: DailyRow[]; expectedReturn: number | null; sigma: number | null }) {
@@ -52,21 +52,21 @@ export function PriceChart({ history, expectedReturn, sigma }: { history: DailyR
             />
             <line x1={lastX} y1={y(last)} x2={nextX} y2={y(band.mid)} stroke={bandColor} strokeWidth={2} strokeDasharray="5 4" />
             <line x1={nextX} x2={nextX} y1={y(band.hi)} y2={y(band.lo)} stroke={bandColor} strokeWidth={2} />
-            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={13} fill="#475569">
+            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={20} fill="#475569">
               {Math.round(band.hi).toLocaleString("ko-KR")}
             </text>
-            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={13} fill="#475569">
+            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={20} fill="#475569">
               {Math.round(band.lo).toLocaleString("ko-KR")}
             </text>
           </>
         )}
         {ticks.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} fontSize={13} fill="#64748b" textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}>
+          <text key={i} x={x(i)} y={H - 6} fontSize={20} fill="#64748b" textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}>
             {shortDate(rows[i].date)}
           </text>
         ))}
         {band && (
-          <text x={nextX} y={H - 8} fontSize={13} fill="#64748b" textAnchor="middle">
+          <text x={nextX} y={H - 6} fontSize={20} fill="#64748b" textAnchor="middle">
             다음
           </text>
         )}

@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildDataset, changeBefore, fitModel, forecast, walkForward, type MacroSeries } from "../shared/model";
+import { buildSamples, changeBefore, MACRO_KEYS, type MacroSeries, type Sample } from "../shared/features";
+import {
+  clipInputs,
+  fitCalibration,
+  fitPanel,
+  fitStock,
+  forecast,
+  metrics,
+  probability,
+  walkForward,
+} from "../shared/model";
 import { normalCdf, ridge, solve } from "../shared/stats";
 import type { Bar, DailyRow } from "../shared/types";
 
-// 재현 가능한 난수
 function rng(seed: number) {
   return () => {
     seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -23,111 +32,145 @@ function weekdays(start: string, n: number) {
   return out;
 }
 
-/** 진짜 관계(나스닥 계수 0.5)가 있는 가짜 시장 */
-function synthetic(n = 400, nasdaqBeta = 0.5, noise = 1) {
-  const r = rng(7);
-  const dates = weekdays("2025-01-01", n);
-  const nq: Bar[] = [];
-  const other = (): Bar[] => {
+/**
+ * 가짜 시장: 시가 갭 = gapBeta × '전날' EWY 등락, 장중 = 잡음.
+ * 종가 수익률 = 갭 + 장중.
+ */
+function market(opts: { n?: number; gapBeta?: number; noise?: number; seed?: number; dates?: string[]; ewy?: number[] } = {}) {
+  const n = opts.dates?.length ?? opts.n ?? 400;
+  const r = rng(opts.seed ?? 7);
+  const dates = opts.dates ?? weekdays("2025-01-01", n);
+  const walk = (vol: number): Bar[] => {
     let v = 100;
-    return dates.map((date) => ({ date, close: (v *= 1 + gauss(r) * 0.01) }));
+    return dates.map((date) => ({ date, close: (v *= 1 + (gauss(r) * vol) / 100) }));
   };
+  const ewyChg = opts.ewy ?? dates.map(() => gauss(r) * 1.5);
   let lvl = 100;
-  const nqChanges: number[] = [];
-  for (const date of dates) {
-    const c = gauss(r) * 1.2;
-    nqChanges.push(c);
-    lvl *= 1 + c / 100;
-    nq.push({ date, close: lvl });
-  }
+  const ewy = dates.map((date, i) => ({ date, close: (lvl *= 1 + ewyChg[i] / 100) }));
+  const macro = Object.fromEntries(MACRO_KEYS.map((k) => [k, walk(1)])) as unknown as MacroSeries;
+  macro.ewy = ewy;
+  macro.us10y = dates.map((date, i) => ({ date, close: 4 + Math.sin(i / 20) * 0.3 + gauss(r) * 0.02 }));
+
   const rows: DailyRow[] = [];
   let px = 10000;
   for (let i = 0; i < n; i++) {
-    // 그날 한국 수익률 = 0.5 × '전날' 나스닥 등락 + 잡음
-    const ret = i > 0 ? nasdaqBeta * nqChanges[i - 1] + gauss(r) * noise : 0;
-    px *= 1 + ret / 100;
-    rows.push({ date: dates[i], close: px, volume: 1_000_000, foreignNet: Math.round(gauss(r) * 50_000), institutionNet: Math.round(gauss(r) * 30_000) });
+    const gap = i > 0 ? (opts.gapBeta ?? 0.5) * ewyChg[i - 1] + gauss(r) * 0.2 : 0;
+    const open = px * (1 + gap / 100);
+    const close = open * (1 + (gauss(r) * (opts.noise ?? 1)) / 100);
+    rows.push({ date: dates[i], open, close, volume: 1_000_000, foreignNet: Math.round(gauss(r) * 50_000), institutionNet: Math.round(gauss(r) * 30_000) });
+    px = close;
   }
-  const macro: MacroSeries = { nasdaq: nq, sox: other(), fx: other(), oil: other() };
-  return { rows, macro, dates };
+  return { rows, macro, dates, ewyChg };
 }
 
-test("정규분포 누적값", () => {
-  assert.ok(Math.abs(normalCdf(0) - 0.5) < 1e-7);
+test("통계 도구", () => {
   assert.ok(Math.abs(normalCdf(1.96) - 0.975) < 1e-4);
-  assert.ok(Math.abs(normalCdf(-1) - 0.1587) < 1e-4);
-});
-
-test("연립방정식 풀이", () => {
   const x = solve([[2, 1], [1, 3]], [3, 5]);
   assert.ok(Math.abs(x[0] - 0.8) < 1e-9 && Math.abs(x[1] - 1.4) < 1e-9);
-});
-
-test("릿지 λ=0이면 최소제곱과 같다", () => {
-  const X = [[1], [2], [3], [4]];
-  const y = [3, 5, 7, 9]; // y = 2x + 1
-  const { beta, sig } = ridge(X, y, 0);
+  const { beta, sig } = ridge([[1], [2], [3], [4]], [3, 5, 7, 9], 0);
   assert.ok(Math.abs(beta[0] / sig[0] - 2) < 1e-9);
 });
 
-test("changeBefore는 같은 날 값을 쓰지 않는다", () => {
+test("changeBefore: 같은 날 값을 쓰지 않고, 금리는 bp로", () => {
   const s: Bar[] = [
-    { date: "2026-01-01", close: 100 },
-    { date: "2026-01-02", close: 110 },
-    { date: "2026-01-05", close: 99 },
+    { date: "2026-01-01", close: 4.0 },
+    { date: "2026-01-02", close: 4.1 },
+    { date: "2026-01-05", close: 3.9 },
   ];
   assert.equal(changeBefore(s, "2026-01-05")!.date, "2026-01-02");
-  assert.ok(Math.abs(changeBefore(s, "2026-01-05")!.change - 10) < 1e-9);
+  assert.ok(Math.abs(changeBefore(s, "2026-01-05", "bp")!.change - 10) < 1e-9);
   assert.equal(changeBefore(s, "2026-01-02"), null);
 });
 
-test("학습하면 숨겨 둔 나스닥 계수를 찾아낸다", () => {
-  const { rows, macro } = synthetic(400, 0.5, 0.8);
-  const { samples } = buildDataset(rows, macro);
-  const m = fitModel(samples.slice(-250))!;
-  assert.ok(m.coef.nasdaq > 0.35 && m.coef.nasdaq < 0.6, `nasdaq=${m.coef.nasdaq}`);
-  for (const k of ["sox", "fx", "oil"] as const) assert.ok(Math.abs(m.coef[k]) < 0.15, `${k}=${m.coef[k]}`);
+test("표본: 시가 갭과 종가 수익률, 5일 누적 입력", () => {
+  const { rows, macro } = market({ n: 60 });
+  const { samples, latestInputs, inputsAsOf } = buildSamples(rows, macro);
+  const s = samples[samples.length - 1];
+  const i = rows.length - 1;
+  assert.ok(Math.abs(s.y.gap! - (rows[i].open / rows[i - 1].close - 1) * 100) < 1e-9);
+  assert.ok(Math.abs(s.y.close! - (rows[i].close / rows[i - 1].close - 1) * 100) < 1e-9);
+  const f5 = rows.slice(i - 5, i).reduce((a, r) => a + r.foreignNet!, 0);
+  assert.ok(Math.abs(s.x.foreign5 - (f5 / 1_000_000) * 100) < 1e-9);
+  assert.ok(latestInputs);
+  assert.equal(inputsAsOf!.ewy, rows[i].date);
 });
 
-test("관계가 있으면 백테스트 적중률이 50%를 넘고, 없으면 50% 근처", () => {
-  const strong = walkForward(buildDataset(...Object.values(synthetic(400, 0.8, 0.5)).slice(0, 2) as [DailyRow[], MacroSeries]).samples)!;
-  assert.ok(strong.hitRate! > 75, `strong=${strong.hitRate}`);
-  assert.ok(strong.pValue! < 0.01);
-  const none = walkForward(buildDataset(...Object.values(synthetic(400, 0, 1)).slice(0, 2) as [DailyRow[], MacroSeries]).samples)!;
-  assert.ok(none.hitRate! > 30 && none.hitRate! < 70, `none=${none.hitRate}`);
+test("학습하면 숨긴 EWY → 시가 갭 관계를 찾는다", () => {
+  const { rows, macro } = market({ gapBeta: 0.5 });
+  const m = fitStock(buildSamples(rows, macro).samples.slice(-250), "gap")!;
+  assert.ok(m.coef.ewy > 0.4 && m.coef.ewy < 0.6, `ewy=${m.coef.ewy}`);
+  assert.ok(Math.abs(m.coef.nasdaq) < 0.05, `nasdaq=${m.coef.nasdaq}`);
 });
 
-test("백테스트는 미래 표본을 쓰지 않는다 (마지막 날 값을 바꿔도 이전 예측은 그대로)", () => {
-  const { samples } = buildDataset(...(Object.values(synthetic(400)).slice(0, 2) as [DailyRow[], MacroSeries]));
-  const a = walkForward(samples)!;
-  const altered = samples.map((s, i) => (i === samples.length - 1 ? { ...s, y: 25 } : s));
-  const b = walkForward(altered)!;
-  assert.deepEqual(a.days.slice(0, -1), b.days.slice(0, -1));
+test("극단값 자르기: 평소의 몇 배인 입력도 상한까지만 반영", () => {
+  const { rows, macro } = market();
+  const d = buildSamples(rows, macro);
+  const m = fitStock(d.samples.slice(-250), "gap")!;
+  const extreme = { ...d.latestInputs!, ewy: 40 };
+  const f = forecast(m, extreme, null);
+  assert.ok(f.clipped.includes("ewy"));
+  assert.equal(clipInputs(extreme, m.lo, m.hi).x.ewy, m.hi.ewy);
+  const atCap = forecast(m, { ...d.latestInputs!, ewy: m.hi.ewy }, null);
+  assert.equal(f.expectedReturn, atCap.expectedReturn);
 });
 
-test("다음 거래일 입력은 마지막 날까지의 값을 쓴다", () => {
-  const { rows, macro, dates } = synthetic(100);
-  const d = buildDataset(rows, macro);
-  assert.ok(d.latestInputs);
-  assert.equal(d.inputsAsOf!.nasdaq, dates[dates.length - 1]);
-  assert.equal(d.inputsAsOf!.foreign, dates[dates.length - 1]);
+test("패널: 종목마다 데이터가 적어도 공통 관계를 더 안정적으로 찾는다", () => {
+  const dates = weekdays("2025-01-01", 120);
+  const ewy = dates.map((_, i) => Math.sin(i * 1.3) * 2);
+  const byStock = new Map<string, Sample[]>();
+  for (let k = 0; k < 20; k++) {
+    const { rows, macro } = market({ dates, ewy, seed: 100 + k, gapBeta: 0.5, noise: 1 });
+    byStock.set(String(k).padStart(6, "0"), buildSamples(rows, macro).samples);
+  }
+  const panel = fitPanel(byStock, "gap");
+  const errPanel = [...panel.stocks.values()].map((m) => Math.abs(m.coef.ewy - 0.5));
+  const errSolo = [...byStock.values()].map((s) => Math.abs(fitStock(s, "gap")!.coef.ewy - 0.5));
+  const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+  assert.ok(avg(errPanel) < avg(errSolo), `panel ${avg(errPanel)} solo ${avg(errSolo)}`);
 });
 
-test("액면분할 같은 비정상 변동일은 학습에서 뺀다", () => {
-  const { rows, macro } = synthetic(200);
-  rows[150] = { ...rows[150], close: rows[149].close / 50 };
-  const { samples } = buildDataset(rows, macro);
-  assert.ok(samples.every((s) => Math.abs(s.y) < 31));
-  assert.ok(!samples.some((s) => s.date === rows[151].date)); // 다음 날도 전일수익률이 비정상이라 제외
+test("확률 보정: 알려진 a, b를 되찾는다", () => {
+  const r = rng(3);
+  const pts = Array.from({ length: 5000 }, () => {
+    const z = gauss(r);
+    return { z, up: r() < 1 / (1 + Math.exp(-(0.8 * z + 0.2))) };
+  });
+  const cal = fitCalibration(pts, false)!;
+  assert.ok(Math.abs(cal.a - 0.8) < 0.1 && Math.abs(cal.b - 0.2) < 0.1, JSON.stringify(cal));
+  // 기본(기울기만): b는 0으로 고정
+  const slope = fitCalibration(pts)!;
+  assert.equal(slope.b, 0);
+  assert.ok(Math.abs(slope.a - 0.8) < 0.15, JSON.stringify(slope));
+  assert.ok(Math.abs(probability(0, 1, null).pUp - 0.5) < 1e-9);
 });
 
-test("예측 확률은 기대수익률 부호와 일치", () => {
-  const { rows, macro } = synthetic(300, 0.5);
-  const d = buildDataset(rows, macro);
-  const m = fitModel(d.samples)!;
-  const up = forecast(m, { ...d.latestInputs!, nasdaq: 3 });
-  const down = forecast(m, { ...d.latestInputs!, nasdaq: -3 });
-  assert.ok(up.pUp > 0.5 && up.expectedReturn > 0);
-  assert.ok(down.pUp < 0.5 && down.expectedReturn < 0);
-  assert.ok(up.contributions.nasdaq > 0 && down.contributions.nasdaq < 0);
+test("워크포워드: 미래 표본을 바꿔도 과거 예측은 그대로", () => {
+  const byStock = new Map<string, Sample[]>();
+  for (let k = 0; k < 3; k++) {
+    const { rows, macro } = market({ seed: 10 + k });
+    byStock.set(String(k), buildSamples(rows, macro).samples);
+  }
+  const a = walkForward(byStock, "close", "panel", 60);
+  const altered = new Map([...byStock].map(([c, s]) => [c, s.map((x, i) => (i === s.length - 1 ? { ...x, y: { close: 25, gap: 25 } } : x))]));
+  const b = walkForward(altered, "close", "panel", 60);
+  const lastDate = a.at(-1)!.date;
+  const before = (ps: typeof a) => ps.filter((p) => p.date < lastDate).map((p) => p.expected);
+  assert.ok(a.length > 0);
+  assert.deepEqual(before(a), before(b));
+});
+
+test("평가: 관계가 있으면 시가 갭 적중률이 높고, 없으면 50% 근처", () => {
+  const make = (gapBeta: number) => {
+    const byStock = new Map<string, Sample[]>();
+    for (let k = 0; k < 4; k++) {
+      const { rows, macro } = market({ seed: 50 + k, gapBeta });
+      byStock.set(String(k), buildSamples(rows, macro).samples);
+    }
+    return metrics(walkForward(byStock, "gap", "extended", 100), null)!;
+  };
+  const strong = make(0.6);
+  const none = make(0);
+  assert.ok(strong.hitRate > 80 && strong.brierSkill > 20, JSON.stringify(strong));
+  assert.ok(none.hitRate > 40 && none.hitRate < 60, JSON.stringify(none));
+  assert.ok(none.brierSkill < 5, JSON.stringify(none));
 });
