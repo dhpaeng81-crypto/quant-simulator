@@ -31,3 +31,26 @@ export function probWords(p: number): string {
   if (p > 0.4) return "약간 하락 쪽";
   return "하락 쪽으로 기움";
 }
+
+/** 다음 자동 갱신 시각 (평일 07:20, 16:40 KST). GitHub 예약 실행은 몇 분 늦을 수 있음 */
+export function nextUpdateLabel(now = new Date()): string {
+  const KST = 9 * 60 * 60 * 1000;
+  const k = new Date(now.getTime() + KST); // UTC 필드로 KST 시각을 읽음
+  const slots = [
+    [7, 20],
+    [16, 40],
+  ];
+  for (let add = 0; add < 8; add++) {
+    const d = new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate() + add));
+    const wd = d.getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    for (const [h, m] of slots) {
+      const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, m);
+      if (t > k.getTime()) {
+        const day = add === 0 ? "오늘" : add === 1 ? "내일" : ["일", "월", "화", "수", "목", "금", "토"][wd] + "요일";
+        return `${day} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      }
+    }
+  }
+  return "";
+}
