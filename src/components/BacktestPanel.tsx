@@ -14,7 +14,7 @@ export function BacktestPanel({ stock }: { stock: StockDetail }) {
   const [target, setTarget] = useState<Target>("gap");
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="예측 대상" className="grid grid-cols-2 rounded-lg bg-slate-100 p-1">
+      <div role="tablist" aria-label="예측 대상" className="grid grid-cols-2 rounded-xl bg-slate-200/70 p-1">
         {(
           [
             ["gap", "시가 (갭)"],
@@ -41,59 +41,64 @@ export function BacktestPanel({ stock }: { stock: StockDetail }) {
 function Results({ data, name, target }: { data: BacktestSummary | null; name: string; target: Target }) {
   const [showAll, setShowAll] = useState(false);
   if (!data) {
-    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">이 종목은 검증할 수 있는 과거 데이터가 부족합니다.</div>;
+    return <div className="rounded-2xl bg-white p-6 text-[15px] text-slate-600">이 종목은 검증할 수 있는 과거 데이터가 부족합니다.</div>;
   }
   const days = [...data.days].reverse();
   const shown = showAll ? days : days.slice(0, 15);
   const vsBase = data.hitRate !== null && data.alwaysUpHitRate !== null ? data.hitRate - data.alwaysUpHitRate : null;
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="bt-title">
-        <h2 id="bt-title" className="text-base font-bold">
-          {name} · {target === "gap" ? "시가" : "종가"} 최근 {data.days.length}거래일 사후 검증
+    <div className="space-y-5">
+      <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="bt-title">
+        <h2 id="bt-title" className="text-lg font-bold">
+          최근 {data.days.length}일 {target === "gap" ? "시가" : "종가"} 성적
         </h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          5거래일마다 그 전 250거래일 데이터로만 모델을 새로 학습해 예측했습니다. 확률 보정도 이 기간 이전 데이터로만 맞췄습니다.
+        <p className="mt-3 text-[15px] leading-relaxed text-slate-800">
+          <span className="num text-3xl font-bold">{data.hitRate === null ? "—" : `${data.hitRate}%`}</span>
+          <span className="ml-2 text-slate-600">
+            {data.evaluated}일 중 {data.hits}일 맞힘
+          </span>
+        </p>
+        {vsBase !== null && data.alwaysUpHitRate !== null && (
+          <p className="num mt-1 text-[15px] text-slate-600">
+            늘 '상승'만 찍었다면 {data.alwaysUpHitRate}% ({vsBase >= 0 ? "+" : ""}
+            {vsBase.toFixed(1)}%p 차이)
+          </p>
+        )}
+
+        <p className="mt-4 flex gap-2 rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-950">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{verdict(data)}</span>
         </p>
 
-        <dl className="mt-4 grid grid-cols-2 gap-3">
-          <Stat label="방향 적중률" value={data.hitRate === null ? "—" : `${data.hitRate}%`} sub={`${data.hits}/${data.evaluated}일`} />
-          <Stat
-            label="'매일 상승' 기준 대비"
-            value={vsBase === null ? "—" : `${vsBase >= 0 ? "+" : ""}${vsBase.toFixed(1)}%p`}
-            sub={data.alwaysUpHitRate === null ? "" : `기준 ${data.alwaysUpHitRate}%`}
-          />
-          {target === "close" ? (
-            <Stat label="상승 전망일만 보유" value={pct(data.strategyReturn)} sub="비용·세금 제외" tone={toneText(data.strategyReturn)} />
-          ) : (
-            <Stat label="예측-실제 상관" value={data.correlation === null ? "—" : String(data.correlation)} sub="1에 가까울수록 잘 맞음" />
-          )}
-          {target === "close" ? (
-            <Stat label="계속 보유" value={pct(data.holdReturn)} sub={`예측-실제 상관 ${data.correlation ?? "—"}`} tone={toneText(data.holdReturn)} />
-          ) : (
-            <Stat label="수익 의미" value="참고용" sub="시가 갭은 장 시작 전엔 사고팔 수 없음" />
-          )}
-        </dl>
-
-        <div className="mt-4 flex gap-2 rounded-lg bg-amber-50 p-3 text-[15px] text-amber-950">
-          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <p>
-            {verdict(data)}
-            {data.pValue !== null && <span className="text-sm text-amber-900"> (우연일 가능성 p = {data.pValue})</span>}
+        <details className="mt-3">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-slate-600 hover:text-slate-900">세부 수치</summary>
+          <dl className="space-y-2 text-[15px]">
+            {target === "close" && (
+              <>
+                <Row label="상승 전망일만 보유했다면" value={pct(data.strategyReturn)} tone={toneText(data.strategyReturn)} />
+                <Row label="계속 보유했다면" value={pct(data.holdReturn)} tone={toneText(data.holdReturn)} />
+              </>
+            )}
+            <Row label="예측-실제 상관" value={data.correlation === null ? "—" : String(data.correlation)} />
+            <Row label="우연일 가능성 (p값)" value={data.pValue === null ? "—" : String(data.pValue)} />
+          </dl>
+          <p className="mt-3 text-sm text-slate-500">
+            5거래일마다 그 전 250거래일로만 다시 학습해 예측했습니다(미래 정보 없음). 수익률은 비용·세금 제외
+            {target === "gap" ? ", 시가 갭은 장 시작 전에 거래할 수 없어 수익과 직접 연결되지 않습니다" : ""}.
           </p>
-        </div>
+        </details>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white" aria-labelledby="bt-table-title">
-        <h3 id="bt-table-title" className="px-4 pt-4 text-base font-bold">
+      <section className="rounded-2xl bg-white" aria-labelledby="bt-table-title">
+        <h3 id="bt-table-title" className="px-5 pt-5 text-lg font-bold">
           날짜별 결과
         </h3>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[340px] text-[15px]">
             <thead>
               <tr className="border-b border-slate-200 text-left text-sm text-slate-500">
-                <th scope="col" className="px-4 py-2 font-medium">날짜</th>
+                <th scope="col" className="px-5 py-2 font-medium">날짜</th>
                 <th scope="col" className="px-2 py-2 text-right font-medium">상승 확률</th>
                 <th scope="col" className="px-2 py-2 text-right font-medium">실제</th>
                 <th scope="col" className="px-4 py-2 text-center font-medium">결과</th>
@@ -102,10 +107,10 @@ function Results({ data, name, target }: { data: BacktestSummary | null; name: s
             <tbody>
               {shown.map((d) => (
                 <tr key={d.date} className="border-b border-slate-100 last:border-0">
-                  <td className="num px-4 py-2.5">{shortDate(d.date)}</td>
-                  <td className="num px-2 py-2.5 text-right">{prob(d.pUp)}</td>
-                  <td className={`num px-2 py-2.5 text-right ${toneText(d.actualReturn)}`}>{pct(d.actualReturn)}</td>
-                  <td className="px-4 py-2.5 text-center">
+                  <td className="num px-5 py-3">{shortDate(d.date)}</td>
+                  <td className="num px-2 py-3 text-right">{prob(d.pUp)}</td>
+                  <td className={`num px-2 py-3 text-right ${toneText(d.actualReturn)}`}>{pct(d.actualReturn)}</td>
+                  <td className="px-5 py-3 text-center">
                     {d.hit === null ? (
                       <span className="text-slate-500">보합</span>
                     ) : d.hit ? (
@@ -133,12 +138,11 @@ function Results({ data, name, target }: { data: BacktestSummary | null; name: s
   );
 }
 
-function Stat({ label, value, sub, tone = "" }: { label: string; value: string; sub?: string; tone?: string }) {
+function Row({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="rounded-lg bg-slate-50 p-3">
-      <dt className="text-sm text-slate-600">{label}</dt>
-      <dd className={`num mt-0.5 text-xl font-bold ${tone}`}>{value}</dd>
-      {sub && <dd className="num text-sm text-slate-500">{sub}</dd>}
+    <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-2">
+      <dt className="text-slate-700">{label}</dt>
+      <dd className={`num font-semibold ${tone}`}>{value}</dd>
     </div>
   );
 }

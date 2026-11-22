@@ -23,17 +23,20 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
   const change = prev ? (last.close / prev.close - 1) * 100 : 0;
   const close = results.close;
   const gap = results.gap;
-  const closeModel = stock.close.model;
 
   const fr = results[factorTarget];
   const fm = stock[factorTarget].model;
-  const contribs = fr ? FEATURE_KEYS.map((k) => ({ k, v: fr.contributions[k] })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v)) : [];
-  const shown = contribs.filter((c) => Math.abs(c.v) >= 0.005).slice(0, 8);
+  const contribs = fr
+    ? FEATURE_KEYS.map((k) => ({ k, v: fr.contributions[k] }))
+        .filter((c) => Math.abs(c.v) >= 0.01)
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+        .slice(0, 5)
+    : [];
   const maxAbs = Math.max(0.0001, ...contribs.map((c) => Math.abs(c.v)));
 
   const shareText =
     close && gap
-      ? `[${stock.name}] 다음 거래일 시가 상승 출발 ${prob(gap.pUp)}, 종가 상승 ${prob(close.pUp)}${isScenario ? " · 가정 시나리오" : ""}\n※ 통계 모델 참고값이며 투자 권유가 아닙니다.`
+      ? `[${stock.name}] 다음 거래일 시가 상승 출발 ${prob(gap.pUp)}, 종가 상승 ${prob(close.pUp)}${isScenario ? " (가정 시나리오)" : ""}\n※ 통계 모델 참고값이며 투자 권유가 아닙니다.`
       : "";
   const copy = async () => {
     try {
@@ -45,14 +48,12 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
     }
   };
 
-  const gapHit = stock.gap.backtest?.hitRate;
-  const closeHit = stock.close.backtest?.hitRate;
-
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="summary-title">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 id="summary-title" className="text-xl font-bold">
+    <div className="space-y-5">
+      {/* 요약: 종목 · 가격 · 확률 두 개 */}
+      <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="summary-title">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 id="summary-title" className="text-2xl font-bold">
             {stock.name}
           </h2>
           <span className="num text-sm text-slate-500">
@@ -60,75 +61,76 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
           </span>
         </div>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2">
-          <span className="num text-2xl font-bold">{won(last.close)}</span>
-          <span className={`num font-semibold ${toneText(change)}`}>{pct(change)}</span>
-          <span className="text-sm text-slate-500">{last.date} 종가</span>
+          <span className="num text-xl font-semibold">{won(last.close)}</span>
+          <span className={`num font-medium ${toneText(change)}`}>{pct(change)}</span>
+          <span className="text-sm text-slate-500">{last.date.slice(5).replace("-", "/")} 종가</span>
         </p>
-        {stock.fundamentals && (
-          <p className="num mt-1 text-sm text-slate-600">
-            {[
-              stock.fundamentals.valuation.per !== null && `PER ${stock.fundamentals.valuation.per.toFixed(1)}배`,
-              stock.fundamentals.valuation.pbr !== null && `PBR ${stock.fundamentals.valuation.pbr.toFixed(2)}배`,
-              stock.fundamentals.valuation.dividendYield !== null && `배당 ${stock.fundamentals.valuation.dividendYield.toFixed(2)}%`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        )}
 
         {close && gap ? (
           <>
-            <p className="mt-4 text-sm text-slate-600">
-              {isScenario ? <strong className="text-amber-800">가정한 시나리오</strong> : "실제 최신 값"} 기준, 다음 거래일
+            <p className="mt-6 text-sm font-medium text-slate-600">
+              다음 거래일 상승 확률{isScenario && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">가정 시나리오</span>}
             </p>
             <div className="mt-2 grid grid-cols-2 gap-3">
               {(["gap", "close"] as const).map((t) => {
                 const r = results[t]!;
-                const hit = t === "gap" ? gapHit : closeHit;
                 return (
-                  <div key={t} className={`rounded-lg p-3 ${r.pUp > 0.53 ? "bg-up-soft" : r.pUp < 0.47 ? "bg-down-soft" : "bg-slate-100"}`}>
-                    <p className="text-sm font-medium text-slate-700">{t === "gap" ? "시가 상승 출발 확률" : "종가 상승 확률"}</p>
-                    <p className={`num mt-0.5 text-2xl font-bold ${toneProb(r.pUp)}`}>{prob(r.pUp)}</p>
-                    <p className="text-sm font-semibold">{probWords(r.pUp)}</p>
-                    <p className="num mt-1 text-sm text-slate-600">
-                      기대 <span className={toneText(r.expectedReturn)}>{pct(r.expectedReturn)}</span>
-                      {hit != null && <> · 최근 적중 {hit}%</>}
-                    </p>
+                  <div key={t} className={`rounded-xl px-4 py-4 ${r.pUp > 0.53 ? "bg-up-soft" : r.pUp < 0.47 ? "bg-down-soft" : "bg-slate-100"}`}>
+                    <p className="text-[15px] font-medium text-slate-700">{TARGET_LABEL[t]}</p>
+                    <p className={`num mt-1 text-3xl font-bold ${toneProb(r.pUp)}`}>{prob(r.pUp)}</p>
+                    <p className="mt-1 text-[15px] text-slate-700">{probWords(r.pUp)}</p>
                   </div>
                 );
               })}
             </div>
-            <p className="mt-3 text-sm text-slate-600">
-              <strong>시가</strong>는 밤사이 미국 시장 움직임이 대부분 반영돼 비교적 잘 맞는 편이고, <strong>종가</strong>는 장중 움직임이 섞여 50% 근처가
-              정상입니다. 확률은 과거 사후 예측으로 보정한 값입니다.
+            <p className="num mt-3 text-sm text-slate-500">
+              최근 60일 적중률 시가 {stock.gap.backtest?.hitRate ?? "—"}% · 종가 {stock.close.backtest?.hitRate ?? "—"}%
             </p>
+
             {outliers.length > 0 && (
-              <p role="note" className="mt-3 flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-950">
+              <p role="note" className="mt-4 flex gap-2 rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-950">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <span>
-                  {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의 학습하지
-                  못해 확률이 실제보다 극단적으로 나올 수 있습니다.
+                  {outliers.map((k) => FEATURE_LABELS[k].name).join("·")} 변동이 평소보다 매우 커서 확률이 과장됐을 수 있어요.
                 </span>
               </p>
             )}
+
+            <details className="group mt-4">
+              <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-slate-600 hover:text-slate-900">이 확률은 어떻게 읽나요?</summary>
+              <div className="space-y-2 pb-1 text-[15px] leading-relaxed text-slate-700">
+                <p>
+                  <strong>시가</strong>는 밤사이 미국 시장이 대부분 반영돼 비교적 잘 맞고, <strong>종가</strong>는 장중 움직임이 섞여 50% 근처가 정상입니다.
+                </p>
+                <p>
+                  기대 수익률은 시가 <span className={`num ${toneText(gap.expectedReturn)}`}>{pct(gap.expectedReturn)}</span>, 종가{" "}
+                  <span className={`num ${toneText(close.expectedReturn)}`}>{pct(close.expectedReturn)}</span>입니다. 확률은 과거 사후 예측으로 보정한 값이며 투자 권유가
+                  아닙니다.
+                </p>
+              </div>
+            </details>
           </>
         ) : (
-          <p className="mt-4 rounded-lg bg-slate-100 p-4 text-[15px] text-slate-700">{stock.notes[0] ?? "이 종목은 전망을 계산하지 못했습니다."}</p>
+          <p className="mt-6 rounded-xl bg-slate-100 p-4 text-[15px] text-slate-700">{stock.notes[0] ?? "이 종목은 전망을 계산하지 못했습니다."}</p>
         )}
+      </section>
 
-        <h3 className="mt-6 text-[15px] font-semibold">최근 60거래일과 다음 거래일 종가 예상 범위</h3>
-        <div className="mt-2">
-          <PriceChart history={stock.history} expectedReturn={close?.expectedReturn ?? null} sigma={closeModel?.sigma ?? null} />
+      {/* 가격 차트 */}
+      <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="chart-title">
+        <h3 id="chart-title" className="text-lg font-bold">
+          최근 60일
+        </h3>
+        <div className="mt-4">
+          <PriceChart history={stock.history} expectedReturn={close?.expectedReturn ?? null} sigma={stock.close.model?.sigma ?? null} />
         </div>
       </section>
 
-      <FundamentalsPanel data={stock.fundamentals} price={last.close} />
-
-      {fr && fm && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="factors-title">
+      {/* 무엇이 움직였나 */}
+      {fr && fm && contribs.length > 0 && (
+        <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="factors-title">
           <div className="flex items-center justify-between gap-2">
-            <h3 id="factors-title" className="text-base font-bold">
-              무엇이 전망을 움직였나
+            <h3 id="factors-title" className="text-lg font-bold">
+              무엇이 움직였나
             </h3>
             <div role="tablist" aria-label="예측 대상" className="flex rounded-lg bg-slate-100 p-0.5">
               {(["gap", "close"] as const).map((t) => (
@@ -138,56 +140,45 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
                   type="button"
                   aria-selected={factorTarget === t}
                   onClick={() => setFactorTarget(t)}
-                  className={`min-h-11 rounded-md px-3 text-sm font-semibold ${factorTarget === t ? "bg-white shadow-sm" : "text-slate-600"}`}
+                  className={`min-h-11 rounded-md px-4 text-sm font-semibold ${factorTarget === t ? "bg-white shadow-sm" : "text-slate-600"}`}
                 >
                   {TARGET_LABEL[t]}
                 </button>
               ))}
             </div>
           </div>
-          <p className="mt-1 text-sm text-slate-500">평균적인 날과 비교해 각 입력이 기대 수익률을 얼마나 올리거나(오른쪽) 내렸는지(왼쪽). 영향이 큰 순.</p>
-          <ul className="mt-3 space-y-2.5">
-            {shown.map(({ k, v }) => {
+          <ul className="mt-5 space-y-4">
+            {contribs.map(({ k, v }) => {
               const w = (Math.abs(v) / maxAbs) * 50;
               return (
                 <li key={k}>
-                  <div className="flex items-baseline justify-between gap-2 text-[15px]">
-                    <span>
-                      {FEATURE_LABELS[k].name}
-                      {fr.clipped.includes(k) && <span className="ml-1 text-sm text-amber-800">(상한 적용)</span>}
-                    </span>
+                  <div className="flex items-baseline justify-between gap-3 text-[15px]">
+                    <span>{FEATURE_LABELS[k].name}</span>
                     <span className={`num shrink-0 font-semibold ${toneText(v)}`}>{signed(v, 2)}%p</span>
                   </div>
-                  <div className="relative mt-1 h-2 rounded-full bg-slate-100" aria-hidden>
+                  <div className="relative mt-1.5 h-1.5 rounded-full bg-slate-100" aria-hidden>
                     <div className="absolute top-0 left-1/2 h-full w-px bg-slate-300" />
                     <div
-                      className={`absolute top-0 h-full rounded-full ${v >= 0 ? "bg-up" : "bg-down"} transition-all duration-300`}
+                      className={`absolute top-0 h-full rounded-full ${v >= 0 ? "bg-up" : "bg-down"} transition-all duration-200`}
                       style={v >= 0 ? { left: "50%", width: `${w}%` } : { right: "50%", width: `${w}%` }}
                     />
                   </div>
                 </li>
               );
             })}
-            {shown.length === 0 && <li className="text-[15px] text-slate-600">모든 입력이 평소 수준이라 눈에 띄는 요인이 없습니다.</li>}
           </ul>
-          <details className="mt-4 text-sm">
-            <summary className="min-h-11 cursor-pointer py-2 font-medium text-slate-700">이 종목 {TARGET_LABEL[factorTarget]} 모델 자세히</summary>
-            <p className="text-slate-600">
-              {fm.trainStart} ~ {fm.trainEnd}의 {fm.n}거래일로 학습. 학습 구간 설명력(R²) {(fm.r2 * 100).toFixed(1)}%, 하루 오차 표준편차 ±
-              {fm.sigma.toFixed(2)}%.
+          <p className="mt-4 text-sm text-slate-500">평소와 비교해 기대 수익률을 올린(빨강)·내린(파랑) 정도</p>
+          <details className="mt-2">
+            <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-slate-600 hover:text-slate-900">모델 계수 보기</summary>
+            <p className="text-sm text-slate-600">
+              {fm.trainStart} ~ {fm.trainEnd}, {fm.n}거래일로 학습 · 설명력 {(fm.r2 * 100).toFixed(1)}% · 하루 오차 ±{fm.sigma.toFixed(2)}%
             </p>
             <table className="mt-2 w-full text-[15px]">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-sm text-slate-500">
-                  <th scope="col" className="py-1.5 font-medium">입력</th>
-                  <th scope="col" className="py-1.5 text-right font-medium">1단위 오를 때 기대 수익률</th>
-                </tr>
-              </thead>
               <tbody>
-                {FEATURE_KEYS.map((k) => (
+                {FEATURE_KEYS.filter((k) => fm.coef[k] !== 0).map((k) => (
                   <tr key={k} className="border-b border-slate-100 last:border-0">
-                    <td className="py-1.5">{FEATURE_LABELS[k].name}</td>
-                    <td className={`num py-1.5 text-right ${toneText(fm.coef[k])}`}>{signed(fm.coef[k], 3)}%p</td>
+                    <td className="py-2">{FEATURE_LABELS[k].name}</td>
+                    <td className={`num py-2 text-right ${toneText(fm.coef[k])}`}>{signed(fm.coef[k], 3)}%p</td>
                   </tr>
                 ))}
               </tbody>
@@ -196,20 +187,21 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
         </section>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="news-title">
-        <h3 id="news-title" className="text-base font-bold">
-          최근 뉴스
-        </h3>
-        {stock.news.length === 0 ? (
-          <p className="mt-2 text-[15px] text-slate-600">수집된 뉴스가 없습니다.</p>
-        ) : (
-          <ul className="mt-1 divide-y divide-slate-100">
+      <FundamentalsPanel data={stock.fundamentals} price={last.close} />
+
+      {/* 뉴스 */}
+      {stock.news.length > 0 && (
+        <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="news-title">
+          <h3 id="news-title" className="text-lg font-bold">
+            뉴스
+          </h3>
+          <ul className="mt-2 divide-y divide-slate-100">
             {stock.news.map((n) => (
               <li key={n.url}>
-                <a href={n.url} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-start gap-2 py-2.5 hover:text-slate-600">
+                <a href={n.url} target="_blank" rel="noopener noreferrer" className="group flex min-h-11 items-start gap-3 py-3">
                   <span className="flex-1">
-                    <span className="block text-[15px] font-medium">{n.title}</span>
-                    <span className="block text-sm text-slate-500">
+                    <span className="block text-[15px] leading-snug font-medium group-hover:underline">{n.title}</span>
+                    <span className="mt-1 block text-sm text-slate-500">
                       {n.source} · {timeAgo(n.publishedAt)}
                     </span>
                   </span>
@@ -218,42 +210,38 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
               </li>
             ))}
           </ul>
-        )}
-      </section>
-
-      {shareText && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="share-title">
-          <h3 id="share-title" className="text-base font-bold">
-            공유
-          </h3>
-          <pre className="mt-2 rounded-lg bg-slate-50 p-3 font-sans text-sm whitespace-pre-wrap text-slate-700">{shareText}</pre>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={copy}
-              className="flex min-h-11 items-center gap-1.5 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-700"
-            >
-              {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />}
-              {copied ? "복사했습니다" : "요약 복사"}
-            </button>
-            <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex min-h-11 items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold hover:bg-slate-50"
-            >
-              X에 공유
-            </a>
-            <a
-              href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== "undefined" ? window.location.href : "")}&text=${encodeURIComponent(shareText)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex min-h-11 items-center rounded-lg border border-slate-300 px-4 text-sm font-semibold hover:bg-slate-50"
-            >
-              텔레그램
-            </a>
-          </div>
         </section>
+      )}
+
+      {/* 공유 */}
+      {shareText && (
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="mr-1 text-sm text-slate-600">공유</span>
+          <button
+            type="button"
+            onClick={copy}
+            className="flex min-h-11 items-center gap-1.5 rounded-lg bg-white px-4 text-sm font-semibold ring-1 ring-slate-200 hover:bg-slate-50"
+          >
+            {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />}
+            {copied ? "복사했어요" : "요약 복사"}
+          </button>
+          <a
+            href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-11 items-center rounded-lg bg-white px-4 text-sm font-semibold ring-1 ring-slate-200 hover:bg-slate-50"
+          >
+            X
+          </a>
+          <a
+            href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== "undefined" ? window.location.href : "")}&text=${encodeURIComponent(shareText)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-11 items-center rounded-lg bg-white px-4 text-sm font-semibold ring-1 ring-slate-200 hover:bg-slate-50"
+          >
+            텔레그램
+          </a>
+        </div>
       )}
     </div>
   );

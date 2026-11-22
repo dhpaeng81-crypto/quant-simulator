@@ -17,7 +17,7 @@ type MobileTab = "stocks" | "scenario" | "report";
 
 function Skeleton() {
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4" aria-busy="true" aria-label="불러오는 중">
+    <div className="space-y-3 rounded-2xl bg-white p-4" aria-busy="true" aria-label="불러오는 중">
       {[40, 64, 100, 100, 72].map((w, i) => (
         <div key={i} className="h-5 rounded bg-slate-100 motion-safe:animate-pulse" style={{ width: `${w}%` }} />
       ))}
@@ -179,13 +179,13 @@ export default function App() {
         </main>
       )}
 
-      <main className={`mx-auto max-w-7xl space-y-4 px-4 py-4 ${page === "evaluation" ? "hidden" : ""}`}>
+      <main className={`mx-auto max-w-7xl space-y-5 px-4 py-5 ${page === "evaluation" ? "hidden" : ""}`}>
         <div className={hidden("report")}>
           <BriefingCard briefing={index.briefing} note={index.nextTradingDayNote} />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-12">
-          <div className="min-w-0 space-y-4 lg:col-span-5">
+        <div className="grid gap-5 lg:grid-cols-12">
+          <div className="min-w-0 space-y-5 lg:col-span-5">
             <div className={hidden("stocks")}>
               <StockList universe={index.stocks} watchlist={watchlist} selected={selected} onSelect={select} onAdd={add} onRemove={remove} />
             </div>
@@ -193,15 +193,15 @@ export default function App() {
               {current?.close.model && current.latestInputs && scenario ? (
                 <ScenarioPanel model={current.close.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
               ) : (
-                <div className="rounded-xl border border-slate-200 bg-white p-4 text-[15px] text-slate-600">
+                <div className="rounded-2xl bg-white p-4 text-[15px] text-slate-600">
                   {current ? "이 종목은 시나리오를 계산할 모델이 없습니다." : "종목을 고르면 시나리오를 바꿔 볼 수 있습니다."}
                 </div>
               )}
             </div>
           </div>
 
-          <div className={`min-w-0 space-y-4 lg:col-span-7 ${hidden("report")}`}>
-            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
+          <div className={`min-w-0 space-y-5 lg:col-span-7 ${hidden("report")}`}>
+            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-2 rounded-xl bg-slate-200/70 p-1">
               {(
                 [
                   ["forecast", "전망"],
@@ -214,7 +214,7 @@ export default function App() {
                   type="button"
                   aria-selected={tab === key}
                   onClick={() => setTab(key)}
-                  className={`min-h-11 rounded-lg text-[15px] font-semibold ${tab === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                  className={`min-h-11 rounded-lg text-[15px] font-semibold ${tab === key ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   {label}
                 </button>

@@ -28,9 +28,9 @@ const ROWS: Array<{ label: string; get: (r: AnnualRow) => string }> = [
 export function FundamentalsPanel({ data, price }: { data: Fundamentals | null; price: number }) {
   if (!data) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="fund-title">
-        <h3 id="fund-title" className="text-base font-bold">
-          재무·투자 지표
+      <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="fund-title">
+        <h3 id="fund-title" className="text-lg font-bold">
+          재무 지표
         </h3>
         <p className="mt-2 text-[15px] text-slate-600">이번 수집에서 재무 지표를 가져오지 못했습니다.</p>
       </section>
@@ -56,53 +56,65 @@ export function FundamentalsPanel({ data, price }: { data: Fundamentals | null; 
     { label: "외국인 소진율", value: num(v.foreignOwnership, 1, "%"), sub: "외국인 보유 한도 대비" },
   ];
 
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="fund-title">
-      <h3 id="fund-title" className="text-base font-bold">
-        재무·투자 지표
-      </h3>
-      <p className="mt-0.5 text-sm text-slate-500">네이버 증권 기준, 수집 시점 값입니다. 모델의 예측 입력에는 쓰이지 않습니다.</p>
+  const key = items.filter((it) => ["PER", "PBR", "배당수익률", "ROE"].includes(it.label));
+  const rest = items.filter((it) => !key.includes(it));
 
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        {items.map((it) => (
-          <div key={it.label} className="min-w-0 border-t border-slate-100 pt-2">
+  return (
+    <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="fund-title">
+      <h3 id="fund-title" className="text-lg font-bold">
+        재무 지표
+      </h3>
+
+      <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+        {key.map((it) => (
+          <div key={it.label}>
             <dt className="text-sm text-slate-600">{it.label}</dt>
-            <dd className="num text-lg font-semibold">{it.value}</dd>
-            {it.sub && <dd className="text-sm text-slate-500">{it.sub}</dd>}
+            <dd className="num mt-0.5 text-xl font-semibold">{it.value}</dd>
           </div>
         ))}
       </dl>
 
-      {range !== null && (
-        <div className="mt-5">
-          <p className="text-sm text-slate-600">52주 가격 범위에서 현재 위치</p>
-          <div className="relative mt-2 h-2 rounded-full bg-slate-100" role="img" aria-label={`52주 최저 ${won(v.low52!)}, 최고 ${won(v.high52!)} 중 ${Math.round(range * 100)}% 위치`}>
-            <div className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-900 shadow" style={{ left: `${Math.min(100, Math.max(0, range * 100))}%` }} />
-          </div>
-          <div className="num mt-1.5 flex justify-between text-sm text-slate-600">
-            <span>최저 {won(v.low52!)}</span>
-            <span>최고 {won(v.high52!)}</span>
-          </div>
-        </div>
-      )}
+      <details className="mt-5 border-t border-slate-100 pt-1">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-slate-600 hover:text-slate-900">지표 더 보기</summary>
 
-      {v.targetPrice !== null && upside !== null && (
-        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2.5 text-[15px]">
-          증권사 평균 목표주가 <span className="num font-semibold">{won(v.targetPrice)}</span>{" "}
-          <span className="num text-slate-600">
-            (현재가 대비 {upside > 0 ? "+" : ""}
-            {upside.toFixed(1)}%)
-          </span>
-          <span className="block text-sm text-slate-500">
-            {v.targetDate ? `${v.targetDate} 집계` : ""} · 증권사 추정의 평균이며, 이 사이트의 예측이 아닙니다.
-          </span>
-        </p>
-      )}
+        <dl className="mt-2 grid grid-cols-1 gap-y-3 sm:grid-cols-2 sm:gap-x-6">
+          {[...key, ...rest].map((it) => (
+            <div key={it.label} className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-2">
+              <dt className="text-[15px] text-slate-700">
+                {it.label}
+                {it.sub && <span className="block text-sm text-slate-500">{it.sub}</span>}
+              </dt>
+              <dd className="num shrink-0 text-[15px] font-semibold">{it.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {range !== null && (
+          <div className="mt-6">
+            <p className="text-[15px] text-slate-700">52주 범위에서 현재 위치</p>
+            <div className="relative mt-3 h-1.5 rounded-full bg-slate-200" role="img" aria-label={`52주 최저 ${won(v.low52!)}, 최고 ${won(v.high52!)} 중 ${Math.round(range * 100)}% 위치`}>
+              <div className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-900" style={{ left: `${Math.min(100, Math.max(0, range * 100))}%` }} />
+            </div>
+            <div className="num mt-2 flex justify-between text-sm text-slate-600">
+              <span>{won(v.low52!)}</span>
+              <span>{won(v.high52!)}</span>
+            </div>
+          </div>
+        )}
+
+        {v.targetPrice !== null && upside !== null && (
+          <p className="mt-6 text-[15px] text-slate-700">
+            증권사 평균 목표주가 <span className="num font-semibold text-slate-900">{won(v.targetPrice)}</span>{" "}
+            <span className="num">({upside > 0 ? "+" : ""}
+            {upside.toFixed(1)}%)</span>
+            <span className="mt-0.5 block text-sm text-slate-500">{v.targetDate ? `${v.targetDate} 집계 · ` : ""}증권사 추정 평균이며 이 사이트의 예측이 아닙니다.</span>
+          </p>
+        )}
 
       {data.annual.length > 0 && (
-        <details className="mt-4">
-          <summary className="min-h-11 cursor-pointer py-2 text-[15px] font-semibold">연간 실적 {data.annual.length}년</summary>
-          <div className="overflow-x-auto">
+        <div className="mt-6">
+          <h4 className="text-[15px] font-semibold">연간 실적</h4>
+          <div className="mt-1 overflow-x-auto">
             <table className="w-full min-w-[360px] text-sm sm:text-[15px]">
               <caption className="sr-only">연간 실적 (단위: 억 원·조 원, %, 원, 배)</caption>
               <thead>
@@ -134,9 +146,10 @@ export function FundamentalsPanel({ data, price }: { data: Fundamentals | null; 
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-sm text-slate-500">추정 열은 증권사 전망치 평균입니다. 배당성향은 주당배당금 ÷ 주당순이익으로 계산했습니다.</p>
-        </details>
+          <p className="mt-2 text-sm text-slate-500">추정 열은 증권사 전망치 평균. 네이버 증권 기준, 예측 모델에는 쓰지 않습니다.</p>
+        </div>
       )}
+      </details>
     </section>
   );
 }

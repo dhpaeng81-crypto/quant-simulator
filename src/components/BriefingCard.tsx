@@ -3,25 +3,25 @@ import { useState } from "react";
 import type { Briefing } from "../../shared/types";
 
 export function BriefingCard({ briefing, note }: { briefing: Briefing; note: string }) {
-  // 휴대폰에서는 접어서 시작 (첫 화면에 종목 전망이 보이도록), 넓은 화면에서는 펼침
-  const [open, setOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
+  // 접어서 시작: 첫 문장만 보이고 필요할 때 펼침
+  const [open, setOpen] = useState(false);
   return (
-    <section className="rounded-xl border border-slate-200 bg-white" aria-labelledby="briefing-title">
+    <section className="rounded-2xl bg-white" aria-labelledby="briefing-title">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex min-h-12 w-full items-center gap-2 px-4 py-3 text-left"
+        className="flex min-h-12 w-full items-center gap-2 px-5 py-3 text-left"
       >
         <h2 id="briefing-title" className="text-base font-bold">
           시장 요약
         </h2>
         <ChevronDown className={`ml-auto size-5 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
-      {!open && briefing.facts[0] && <p className="-mt-1 px-4 pb-3 text-[15px] text-slate-700">{briefing.facts[0]}</p>}
+      {!open && briefing.facts[0] && <p className="-mt-1 truncate px-5 pb-4 text-[15px] text-slate-700 sm:whitespace-normal">{briefing.facts[0]}</p>}
       {open && (
-        <div className="border-t border-slate-100 px-4 py-4 text-[15px] leading-relaxed">
-          <ul className="list-disc space-y-1.5 pl-5">
+        <div className="border-t border-slate-100 px-5 py-4 text-[15px] leading-relaxed">
+          <ul className="list-disc space-y-2 pl-5">
             {briefing.facts.map((f, i) => (
               <li key={i}>{f}</li>
             ))}
