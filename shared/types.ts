@@ -247,4 +247,7 @@ export interface EvaluationFile {
   chosenReason: string;
   variants: ModelVariantResult[];
   calibrationBins: Record<Target, CalibrationBin[]>;
+  /** 평가 기간 전체(약 1년)의 월별 방향 적중률. 확률 보정과 무관(보정은 방향을 바꾸지 않음) */
+  monthly: Record<Target, Array<{ month: string; hitRate: number; n: number }>>;
+  evalStart: string;
 }

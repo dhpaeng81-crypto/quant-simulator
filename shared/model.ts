@@ -478,3 +478,19 @@ export const PRESETS: Array<{ id: string; name: string; description: string; app
     apply: (x) => ({ ...x, us10y: 15, nasdaq: -1.5, dxy: 0.5 }),
   },
 ];
+
+/** 월별 방향 적중률 (기대수익률 부호 기준, 보합 제외) */
+export function monthlyHitRates(preds: OosPrediction[]): Array<{ month: string; hitRate: number; n: number }> {
+  const m = new Map<string, { hits: number; n: number }>();
+  for (const p of preds) {
+    if (p.actual === 0) continue;
+    const key = p.date.slice(0, 7);
+    const e = m.get(key) ?? { hits: 0, n: 0 };
+    e.n++;
+    if (p.expected >= 0 === p.actual > 0) e.hits++;
+    m.set(key, e);
+  }
+  return [...m]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, e]) => ({ month, hitRate: Math.round((e.hits / e.n) * 1000) / 10, n: e.n }));
+}
