@@ -1,5 +1,5 @@
-import { BarChart3, ChevronLeft, ClipboardCheck, List, SlidersHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { BarChart3, ChevronLeft, ClipboardCheck, List, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { forecast } from "../shared/model";
 import { FEATURE_KEYS, TARGETS, type Features, type ForecastResult, type IndexFile, type StockDetail, type Target } from "../shared/types";
 import { BacktestPanel } from "./components/BacktestPanel";
@@ -9,8 +9,8 @@ import { ForecastPanel } from "./components/ForecastPanel";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { StockList } from "./components/StockList";
 import { TickerBar } from "./components/TickerBar";
-import { loadIndex, loadStock } from "./lib/data";
-import { dateTimeKo } from "./lib/format";
+import { loadIndex, loadStock, resetStockCache } from "./lib/data";
+import { dateTimeKo, nextUpdateLabel, timeAgo } from "./lib/format";
 import { loadWatchlist, saveWatchlist } from "./lib/storage";
 
 type MobileTab = "stocks" | "scenario" | "report";
@@ -38,6 +38,10 @@ export default function App() {
   const [tab, setTab] = useState<"forecast" | "backtest">("forecast");
   const [page, setPage] = useState<"main" | "evaluation">(() => (window.location.hash === "#evaluation" ? "evaluation" : "main"));
   const [mobileTab, setMobileTab] = useState<MobileTab>("report");
+  const [dataVersion, setDataVersion] = useState(0); // 새 데이터를 받을 때마다 증가
+  const [refreshing, setRefreshing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     loadIndex()
@@ -86,7 +90,36 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, dataVersion]);
+
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 5000);
+  };
+
+  /** 서버에 올라온 최신 데이터를 다시 받음 (수집 자체는 GitHub Actions가 평일 하루 두 번) */
+  const refresh = async () => {
+    if (refreshing || !index) return;
+    setRefreshing(true);
+    try {
+      const fresh = await loadIndex(true);
+      if (fresh.generatedAt === index.generatedAt) {
+        showNotice(`이미 최신 데이터예요 (${timeAgo(fresh.generatedAt)} 갱신). 다음 자동 갱신은 ${nextUpdateLabel()} 무렵입니다.`);
+      } else {
+        resetStockCache();
+        setIndex(fresh);
+        setDataVersion((v) => v + 1);
+        showNotice(`새 데이터를 불러왔어요 (${dateTimeKo(fresh.generatedAt)} 갱신).`);
+      }
+    } catch (e) {
+      showNotice(`불러오지 못했어요: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const current = detail && detail.code === selected ? detail : null;
   const results = useMemo(() => {
@@ -149,9 +182,19 @@ export default function App() {
               )}
             </h1>
             <p className="text-sm text-slate-600">
-              시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
+              {dateTimeKo(index.generatedAt)} 갱신<span className="hidden sm:inline"> · 다음 {nextUpdateLabel()}</span>
             </p>
           </div>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={refreshing}
+            aria-label="최신 데이터 다시 불러오기"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 px-3 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw className={`size-4 ${refreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden />
+            <span className="hidden sm:inline">새로고침</span>
+          </button>
           <button
             type="button"
             onClick={() => openPage(page === "evaluation" ? "main" : "evaluation")}
@@ -166,6 +209,10 @@ export default function App() {
         </div>
       </header>
 
+      <div aria-live="polite" className="mx-auto max-w-7xl px-4">
+        {notice && <p className="mt-4 rounded-xl bg-slate-900 px-4 py-3 text-[15px] text-white">{notice}</p>}
+      </div>
+
       {page === "evaluation" && (
         <main className="mx-auto max-w-3xl px-4 py-4">
           <button
@@ -175,7 +222,7 @@ export default function App() {
           >
             <ChevronLeft className="size-4" aria-hidden /> 전망으로 돌아가기
           </button>
-          <EvaluationPanel />
+          <EvaluationPanel version={dataVersion} />
         </main>
       )}
 
@@ -236,7 +283,17 @@ export default function App() {
 
       <footer className="mx-auto max-w-7xl px-4 pt-4 pb-8 text-sm leading-relaxed text-slate-500">
         <p>최근 1년 데이터로 학습한 통계 모델({index.model.name})의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
-        <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 하루 두 번 갱신.</p>
+        <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 07:20·16:40 자동 갱신.</p>
+        <p className="mt-1">
+          <a
+            href="https://github.com/dhpaeng81-crypto/quant-simulator/actions/workflows/update.yml"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center underline underline-offset-2 hover:text-slate-700"
+          >
+            지금 새로 수집하기 (저장소 관리자용, GitHub에서 Run workflow)
+          </a>
+        </p>
       </footer>
 
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="화면 전환">

@@ -17,12 +17,12 @@ function grade(skill: number): { label: string; tone: string; note: string } {
 
 const monthLabel = (ym: string) => `${Number(ym.slice(5, 7))}월`;
 
-export function EvaluationPanel() {
+export function EvaluationPanel({ version = 0 }: { version?: number }) {
   const [data, setData] = useState<EvaluationFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    loadEvaluation().then(setData, (e) => setError((e as Error).message));
-  }, []);
+    loadEvaluation(version > 0).then(setData, (e) => setError((e as Error).message));
+  }, [version]);
 
   if (error) return <div className="rounded-2xl bg-white p-6 text-[15px] text-slate-600">{error}</div>;
   if (!data) return <div className="h-96 rounded-2xl bg-white motion-safe:animate-pulse" aria-busy="true" aria-label="불러오는 중" />;
