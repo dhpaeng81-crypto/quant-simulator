@@ -15,6 +15,7 @@ import {
   fitVariant,
   forecast,
   metrics,
+  monthlyHitRates,
   pairedImprovement,
   summarizeBacktest,
   TRAIN_WINDOW,
@@ -330,6 +331,8 @@ async function main() {
     calibrationBins: Object.fromEntries(
       TARGETS.map((t) => [t, calibrationBins(secondHalf(preds.get(`${chosen}:${t}`)!), halfCal.get(`${chosen}:${t}`) ?? null)]),
     ) as EvaluationFile["calibrationBins"],
+    monthly: Object.fromEntries(TARGETS.map((t) => [t, monthlyHitRates(preds.get(`${chosen}:${t}`)!)])) as EvaluationFile["monthly"],
+    evalStart: evalDates[0] ?? "",
   };
   await writeFile(path.join(OUT, "evaluation.json"), JSON.stringify(evaluation));
 
