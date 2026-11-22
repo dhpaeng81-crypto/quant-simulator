@@ -59,10 +59,11 @@ function Slider({ k, model, actual, asOf, value, onChange }: Props & { k: Featur
         className="mt-1 w-full"
         aria-describedby={`${id}-hint`}
       />
-      <p id={`${id}-hint`} className="text-sm text-slate-500">
+      <p id={`${id}-hint`} className={changed || outside ? "text-sm text-slate-600" : "sr-only"}>
         {FEATURE_LABELS[k].hint}
-        {changed ? ` · 실제 ${signed(actual[k], digits)}${unit}` : asOf?.[k] ? ` · ${shortDate(asOf[k]!)} 값` : ""}
-        {outside && <span className="text-amber-800"> · 평소 범위 밖 (상한까지만 반영)</span>}
+        {asOf?.[k] ? ` (${shortDate(asOf[k]!)})` : ""}
+        {changed && ` · 실제 ${signed(actual[k], digits)}${unit}`}
+        {outside && <span className="text-amber-800"> · 평소 범위 밖</span>}
       </p>
     </div>
   );
@@ -73,13 +74,13 @@ export function ScenarioPanel(props: Props) {
   const isActual = FEATURE_KEYS.every((k) => value[k] === actual[k]);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="scenario-title">
+    <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="scenario-title">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 id="scenario-title" className="text-base font-bold">
+          <h2 id="scenario-title" className="text-lg font-bold">
             시나리오 바꿔 보기
           </h2>
-          <p className="mt-0.5 text-sm text-slate-500">처음 값은 실제 최신 값입니다. 바꾸면 결과가 바로 다시 계산됩니다.</p>
+          <p className="mt-1 text-sm text-slate-600">값을 바꾸면 확률이 바로 다시 계산돼요.</p>
         </div>
         <button
           type="button"
@@ -91,27 +92,27 @@ export function ScenarioPanel(props: Props) {
         </button>
       </div>
 
-      <h3 className="mt-4 text-sm font-semibold text-slate-700">예시 시나리오</h3>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="예시 시나리오">
         {PRESETS.map((p) => (
           <button
             key={p.id}
             type="button"
             onClick={() => onChange(p.apply(actual))}
-            className="min-h-11 rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-slate-400 hover:bg-slate-50"
+            title={p.description}
+            className="min-h-11 rounded-full bg-slate-100 px-4 text-[15px] font-medium hover:bg-slate-200"
           >
-            <span className="block text-[15px] font-semibold">{p.name}</span>
-            <span className="block text-sm text-slate-500">{p.description}</span>
+            {p.name}
+            <span className="sr-only">: {p.description}</span>
           </button>
         ))}
       </div>
 
       {FEATURE_GROUPS.map((g, i) => (
-        <details key={g.name} open={i === 0} className="mt-4 border-t border-slate-100 pt-2">
+        <details key={g.name} open={i === 0} className="mt-5 border-t border-slate-100 pt-2">
           <summary className="min-h-11 cursor-pointer py-2 text-[15px] font-semibold">
             {g.name} <span className="font-normal text-slate-500">({g.keys.length})</span>
           </summary>
-          <div className="space-y-4 pb-2">
+          <div className="space-y-5 pb-2">
             {g.keys.map((k) => (
               <Slider key={k} k={k} {...props} />
             ))}

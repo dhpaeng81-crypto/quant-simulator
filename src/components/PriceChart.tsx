@@ -1,95 +1,90 @@
+import { useEffect, useRef, useState } from "react";
 import type { DailyRow } from "../../shared/types";
 import { shortDate, won } from "../lib/format";
 
-const W = 600;
-const H = 240;
-const PAD = { top: 28, right: 96, bottom: 40, left: 8 };
+const H = 200;
+const PAD = { top: 22, right: 72, bottom: 28, left: 4 };
+const FONT = 13;
 
-/** 최근 종가와 다음 거래일 예상 범위(기대값 ± 표준편차 1개, 약 68%) */
+/** 최근 종가와 다음 거래일 예상 범위(기대값 ± 표준편차 1개, 약 68%). 실제 폭에 맞춰 그려 글자 크기가 일정 */
 export function PriceChart({ history, expectedReturn, sigma }: { history: DailyRow[]; expectedReturn: number | null; sigma: number | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(600);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.max(280, Math.round(e.contentRect.width))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const rows = history.slice(-60);
   if (rows.length < 2) return null;
   const last = rows[rows.length - 1].close;
   const band =
     expectedReturn !== null && sigma !== null
-      ? {
-          mid: last * (1 + expectedReturn / 100),
-          lo: last * (1 + (expectedReturn - sigma) / 100),
-          hi: last * (1 + (expectedReturn + sigma) / 100),
-        }
+      ? { mid: last * (1 + expectedReturn / 100), lo: last * (1 + (expectedReturn - sigma) / 100), hi: last * (1 + (expectedReturn + sigma) / 100) }
       : null;
 
-  const values = rows.map((r) => r.close).concat(band ? [band.lo, band.hi] : []);
+  const closes = rows.map((r) => r.close);
+  const values = closes.concat(band ? [band.lo, band.hi] : []);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || last * 0.01;
-  const lo = min - span * 0.05;
-  const hi = max + span * 0.05;
-  const GAP = 8; // 다음 거래일 범위를 그릴 여백(칸 수)
+  const lo = min - span * 0.04;
+  const hi = max + span * 0.04;
+  const GAP = 6;
   const slots = rows.length + (band ? GAP : 0);
   const x = (i: number) => PAD.left + (i * (W - PAD.left - PAD.right)) / (slots - 1);
   const y = (v: number) => PAD.top + ((hi - v) / (hi - lo)) * (H - PAD.top - PAD.bottom);
   const line = rows.map((r, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(r.close).toFixed(1)}`).join(" ");
   const lastX = x(rows.length - 1);
   const nextX = x(rows.length + GAP - 2);
-  const ticks = [0, Math.floor(rows.length / 2), rows.length - 1];
-  const bandColor = band && band.mid >= last ? "#dc2626" : "#2563eb";
+  const color = band && band.mid >= last ? "#dc2626" : "#2563eb";
+  const maxI = closes.indexOf(Math.max(...closes));
+  const minI = closes.indexOf(Math.min(...closes));
+  const anchor = (i: number) => (i < rows.length * 0.15 ? "start" : i > rows.length * 0.8 ? "end" : "middle");
+  const fmt = (v: number) => Math.round(v).toLocaleString("ko-KR");
 
   return (
-    <figure>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={`최근 ${rows.length}거래일 종가와 다음 거래일 예상 범위`}>
-        {[0.25, 0.5, 0.75].map((t) => (
-          <line key={t} x1={PAD.left} x2={W - PAD.right} y1={PAD.top + t * (H - PAD.top - PAD.bottom)} y2={PAD.top + t * (H - PAD.top - PAD.bottom)} stroke="#f1f5f9" />
-        ))}
-        {(() => {
-          const closes = rows.map((r) => r.close);
-          const maxI = closes.indexOf(Math.max(...closes));
-          const minI = closes.indexOf(Math.min(...closes));
-          const anchor = (i: number) => (i < rows.length * 0.15 ? "start" : i > rows.length * 0.85 ? "end" : "middle");
-          return (
-            <>
-              <text x={x(maxI)} y={y(closes[maxI]) - 8} fontSize={18} fill="#475569" textAnchor={anchor(maxI)}>
-                {Math.round(closes[maxI]).toLocaleString("ko-KR")}
-              </text>
-              <text x={x(minI)} y={y(closes[minI]) + 22} fontSize={18} fill="#475569" textAnchor={anchor(minI)}>
-                {Math.round(closes[minI]).toLocaleString("ko-KR")}
-              </text>
-            </>
-          );
-        })()}
-        <path d={line} fill="none" stroke="#0f172a" strokeWidth={2} strokeLinejoin="round" />
+    <figure ref={ref}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`최근 ${rows.length}거래일 종가, 최고 ${won(closes[maxI])}, 최저 ${won(closes[minI])}`}>
+        <path d={line} fill="none" stroke="#0f172a" strokeWidth={1.75} strokeLinejoin="round" />
+        <text x={x(maxI)} y={y(closes[maxI]) - 8} fontSize={FONT} fill="#64748b" textAnchor={anchor(maxI)}>
+          {fmt(closes[maxI])}
+        </text>
+        <text x={x(minI)} y={y(closes[minI]) + 18} fontSize={FONT} fill="#64748b" textAnchor={anchor(minI)}>
+          {fmt(closes[minI])}
+        </text>
         <circle cx={lastX} cy={y(last)} r={3.5} fill="#0f172a" />
         {band && (
           <>
-            <path
-              d={`M${lastX},${y(last)} L${nextX},${y(band.hi)} L${nextX},${y(band.lo)} Z`}
-              fill={bandColor}
-              opacity={0.12}
-            />
-            <line x1={lastX} y1={y(last)} x2={nextX} y2={y(band.mid)} stroke={bandColor} strokeWidth={2} strokeDasharray="5 4" />
-            <line x1={nextX} x2={nextX} y1={y(band.hi)} y2={y(band.lo)} stroke={bandColor} strokeWidth={2} />
-            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={20} fill="#475569">
-              {Math.round(band.hi).toLocaleString("ko-KR")}
+            <path d={`M${lastX},${y(last)} L${nextX},${y(band.hi)} L${nextX},${y(band.lo)} Z`} fill={color} opacity={0.1} />
+            <line x1={lastX} y1={y(last)} x2={nextX} y2={y(band.mid)} stroke={color} strokeWidth={1.75} strokeDasharray="4 3" />
+            <line x1={nextX} x2={nextX} y1={y(band.hi)} y2={y(band.lo)} stroke={color} strokeWidth={2} />
+            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={FONT} fill="#475569">
+              {fmt(band.hi)}
             </text>
-            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={20} fill="#475569">
-              {Math.round(band.lo).toLocaleString("ko-KR")}
+            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={FONT} fill="#475569">
+              {fmt(band.lo)}
             </text>
           </>
         )}
-        {ticks.map((i) => (
-          <text key={i} x={x(i)} y={H - 6} fontSize={20} fill="#64748b" textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}>
-            {shortDate(rows[i].date)}
-          </text>
-        ))}
+        <text x={x(0)} y={H - 6} fontSize={FONT} fill="#64748b">
+          {shortDate(rows[0].date)}
+        </text>
+        <text x={lastX} y={H - 6} fontSize={FONT} fill="#64748b" textAnchor="end">
+          {shortDate(rows[rows.length - 1].date)}
+        </text>
         {band && (
-          <text x={nextX} y={H - 6} fontSize={20} fill="#64748b" textAnchor="middle">
+          <text x={nextX} y={H - 6} fontSize={FONT} fill="#64748b" textAnchor="middle">
             다음
           </text>
         )}
       </svg>
       {band && (
-        <figcaption className="mt-1 text-sm text-slate-600">
-          점선 끝의 세로 막대가 다음 거래일 예상 범위입니다(약 68% 확률로 이 안): {won(band.lo)} ~ {won(band.hi)}
+        <figcaption className="num mt-2 text-sm text-slate-600">
+          다음 거래일 예상 범위 {won(band.lo)} ~ {won(band.hi)} <span className="text-slate-500">(약 68%)</span>
         </figcaption>
       )}
     </figure>

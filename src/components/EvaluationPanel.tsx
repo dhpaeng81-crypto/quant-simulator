@@ -5,10 +5,6 @@ import { loadEvaluation } from "../lib/data";
 import { shortDate } from "../lib/format";
 
 const TARGET_LABEL: Record<Target, string> = { gap: "시가 방향", close: "종가 방향" };
-const TARGET_HINT: Record<Target, string> = {
-  gap: "다음 날 아침 시가가 전날 종가보다 높게 출발할지",
-  close: "다음 날 종가가 전날 종가보다 오를지",
-};
 
 /** 확률 점수(Brier skill, %) → 등급 */
 function grade(skill: number): { label: string; tone: string; note: string } {
@@ -28,8 +24,8 @@ export function EvaluationPanel() {
     loadEvaluation().then(setData, (e) => setError((e as Error).message));
   }, []);
 
-  if (error) return <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">{error}</div>;
-  if (!data) return <div className="h-96 rounded-xl border border-slate-200 bg-white motion-safe:animate-pulse" aria-busy="true" aria-label="불러오는 중" />;
+  if (error) return <div className="rounded-2xl bg-white p-6 text-[15px] text-slate-600">{error}</div>;
+  if (!data) return <div className="h-96 rounded-2xl bg-white motion-safe:animate-pulse" aria-busy="true" aria-label="불러오는 중" />;
 
   const chosen = data.variants.find((v) => v.id === data.chosen)!;
   const m = chosen.metrics;
@@ -43,23 +39,23 @@ export function EvaluationPanel() {
       : "평가할 데이터가 부족합니다.";
 
   return (
-    <article className="space-y-4" aria-labelledby="eval-title">
+    <article className="space-y-5" aria-labelledby="eval-title">
       {/* 1. 한 줄 결론 */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-2xl bg-white p-5 sm:p-6">
         <p className="text-sm font-medium text-slate-600">
           모델 성적표 · {shortDate(data.testStart)}~{shortDate(data.testEnd)} 사후 예측 {data.predictionsPerTarget.toLocaleString("ko-KR")}건
         </p>
         <h2 id="eval-title" className="mt-1 text-xl leading-snug font-bold text-balance">
           {headline}
         </h2>
-        <p className="mt-3 text-[15px] text-pretty text-slate-700">
-          모든 예측은 그날 이전 데이터로만 만들었습니다. 지금 쓰는 모델은 <strong>{chosen.name}</strong>입니다. {data.chosenReason}
+        <p className="mt-3 text-sm text-slate-600">
+          그날 이전 데이터로만 예측 · 사용 모델: {chosen.name}
         </p>
       </section>
 
       {/* 2. 핵심 지표 인덱스 */}
-      <section className="rounded-xl border border-slate-200 bg-white" aria-labelledby="index-title">
-        <h3 id="index-title" className="px-5 pt-4 text-base font-bold">
+      <section className="rounded-2xl bg-white" aria-labelledby="index-title">
+        <h3 id="index-title" className="px-5 pt-5 text-lg font-bold sm:px-6">
           핵심 지표
         </h3>
         <ul className="mt-2 divide-y divide-slate-100">
@@ -70,12 +66,11 @@ export function EvaluationPanel() {
             // 50%~75% 구간을 막대 전체로
             const pos = (v: number) => `${Math.min(100, Math.max(0, ((v - 50) / 25) * 100))}%`;
             return (
-              <li key={t} className="px-5 py-4">
+              <li key={t} className="px-5 py-5 sm:px-6">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <span className="text-[15px] font-semibold">{TARGET_LABEL[t]}</span>
                   <span className={`rounded px-2 py-0.5 text-sm font-semibold ${g.tone}`}>예측력 {g.label}</span>
                 </div>
-                <p className="text-sm text-slate-600">{TARGET_HINT[t]}</p>
 
                 <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
                   <span className="num text-2xl font-bold whitespace-nowrap">{mt.hitRate}%</span>
@@ -90,33 +85,12 @@ export function EvaluationPanel() {
                     </div>
                   </div>
                 </div>
-                <p className="mt-2 text-[15px] text-slate-700">
-                  10번 중 <strong className="num">{(mt.hitRate / 10).toFixed(1)}번</strong> 맞힘. 늘 많은 쪽으로만 찍었다면{" "}
-                  <span className="num">{Math.max(mt.baseRate, 100 - mt.baseRate).toFixed(1)}%</span>
-                  <span className="text-amber-800"> (주황 선)</span>. {g.note}
+                <p className="mt-3 text-[15px] text-slate-700">
+                  10번 중 <strong className="num">{(mt.hitRate / 10).toFixed(1)}번</strong> · {beatAll(t)}/{data.monthly[t].length}개월 50% 넘음
                 </p>
-                <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600">
-                  <div>
-                    <dt className="inline">확률 점수 </dt>
-                    <dd className="num inline font-semibold text-slate-800">
-                      {mt.brierSkill > 0 ? "+" : ""}
-                      {mt.brierSkill.toFixed(1)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="inline">상위·하위 20% 종목 하루 수익 차 </dt>
-                    <dd className="num inline font-semibold text-slate-800">
-                      {mt.topBottomSpread > 0 ? "+" : ""}
-                      {mt.topBottomSpread.toFixed(2)}%p
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="inline">월별 </dt>
-                    <dd className="num inline font-semibold text-slate-800">
-                      {beatAll(t)}/{data.monthly[t].length}개월 50% 넘음
-                    </dd>
-                  </div>
-                </dl>
+                <p className="mt-1 text-sm text-slate-500">
+                  주황 선: 늘 많은 쪽으로만 찍었을 때 {Math.max(mt.baseRate, 100 - mt.baseRate).toFixed(1)}%
+                </p>
               </li>
             );
           })}
@@ -124,12 +98,12 @@ export function EvaluationPanel() {
       </section>
 
       {/* 3. 꾸준한가 */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="monthly-title">
-        <h3 id="monthly-title" className="text-base font-bold">
-          꾸준한가: 월별 적중률
+      <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="monthly-title">
+        <h3 id="monthly-title" className="text-lg font-bold">
+          월별 적중률
         </h3>
-        <p className="mt-0.5 text-sm text-slate-600">
-          최근 {months}개월({shortDate(data.evalStart)}부터). 막대가 주황 점선(50%)보다 높으면 그달은 동전 던지기보다 나았다는 뜻입니다.
+        <p className="mt-1 text-sm text-slate-600">
+          최근 {months}개월 · 주황 점선 위면 동전 던지기보다 나음
         </p>
         <div className="mt-4 space-y-5">
           {order.map((t) => (
@@ -138,12 +112,8 @@ export function EvaluationPanel() {
         </div>
       </section>
 
-      {/* 4. 읽는 법 + 자세히 */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="howto-title">
-        <h3 id="howto-title" className="text-base font-bold">
-          이 숫자를 어떻게 읽나요
-        </h3>
-        <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[15px] text-slate-700">
+      <Details title="이 숫자를 어떻게 읽나요">
+        <ul className="list-disc space-y-2 pl-5 text-[15px] leading-relaxed text-slate-700">
           <li>
             <strong>시가</strong>는 밤사이 미국 시장 움직임이 대부분 반영되는 구간이라 비교적 잘 맞습니다. 다만 장이 열리기 전에는 사고팔 수 없어 수익과 바로
             연결되지는 않습니다.
@@ -156,11 +126,12 @@ export function EvaluationPanel() {
           </li>
           <li>과거 성적이 앞으로도 이어진다는 보장은 없습니다. 투자 판단의 근거로 쓰지 마세요.</li>
         </ul>
-      </section>
+        <p className="mt-3 text-sm text-slate-600">{data.chosenReason}</p>
+      </Details>
 
       <Details title="모델 비교 (기본·1차·확장·패널)">
         <p className="text-sm text-slate-600">
-          같은 기간·같은 방식으로 평가했습니다. t값이 +2 이상이어야 기본 모델보다 확실히 낫다고 봅니다.
+          같은 기간·같은 방식으로 평가. 확률점수: 평균 비율로만 답했을 때보다 줄인 확률 오차(%). 상하위차: 확률 상위·하위 20% 종목의 하루 수익률 차(%p). t값 +2 이상이어야 기본 모델보다 확실히 나음.
         </p>
         {order.map((t) => (
           <div key={t} className="mt-4">
@@ -171,6 +142,7 @@ export function EvaluationPanel() {
                   <th scope="col" className="py-2 pr-2 font-medium">모델</th>
                   <th scope="col" className="px-1.5 py-2 text-right font-medium whitespace-nowrap">적중률</th>
                   <th scope="col" className="px-1.5 py-2 text-right font-medium whitespace-nowrap">확률점수</th>
+                  <th scope="col" className="px-1.5 py-2 text-right font-medium whitespace-nowrap">상하위차</th>
                   <th scope="col" className="py-2 pl-1.5 text-right font-medium whitespace-nowrap">t값</th>
                 </tr>
               </thead>
@@ -186,6 +158,7 @@ export function EvaluationPanel() {
                       </td>
                       <td className="num px-1.5 py-2 text-right whitespace-nowrap">{mt ? `${mt.hitRate}%` : "—"}</td>
                       <td className="num px-1.5 py-2 text-right whitespace-nowrap">{mt ? `${mt.brierSkill > 0 ? "+" : ""}${mt.brierSkill.toFixed(1)}` : "—"}</td>
+                      <td className="num px-1.5 py-2 text-right whitespace-nowrap">{mt ? `${mt.topBottomSpread > 0 ? "+" : ""}${mt.topBottomSpread.toFixed(2)}` : "—"}</td>
                       <td className="num py-2 pl-1.5 text-right whitespace-nowrap text-slate-600">
                         {v.vsDefault[t] ? `${v.vsDefault[t]!.t > 0 ? "+" : ""}${v.vsDefault[t]!.t.toFixed(1)}` : "기준"}
                       </td>
@@ -270,7 +243,7 @@ function MonthlyBars({ label, rows }: { label: string; rows: Array<{ month: stri
 
 function Details({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <details className="group rounded-xl border border-slate-200 bg-white px-5">
+    <details className="group rounded-2xl bg-white px-5 sm:px-6">
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 py-3 text-base font-bold [&::-webkit-details-marker]:hidden">
         {title}
         <ChevronDown className="ml-auto size-5 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />

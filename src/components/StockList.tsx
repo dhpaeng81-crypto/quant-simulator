@@ -57,8 +57,8 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
   };
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white" aria-labelledby="list-title">
-      <div className="px-4 pt-4">
+    <section className="rounded-2xl bg-white" aria-labelledby="list-title">
+      <div className="px-5 pt-5">
         <h2 id="list-title" className="sr-only">
           종목 목록
         </h2>
@@ -151,7 +151,7 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
         )}
       </div>
 
-      <div className="mt-3 flex border-y border-slate-100 bg-slate-50 px-4 py-1.5 text-xs text-slate-600">
+      <div className="mt-4 flex border-b border-slate-100 px-5 py-2 text-xs text-slate-500">
         <span className="flex-1">종목</span>
         <span className="w-24 text-right">종가</span>
         <span className="w-16 text-right leading-tight">
@@ -171,7 +171,7 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
                 type="button"
                 onClick={() => onSelect(s.code)}
                 aria-current={active ? "true" : undefined}
-                className="flex min-h-14 min-w-0 flex-1 items-center gap-2 py-2 pl-4 text-left hover:bg-slate-50"
+                className="flex min-h-16 min-w-0 flex-1 items-center gap-2 py-3 pl-5 text-left hover:bg-slate-50"
               >
                 <span className="min-w-0 flex-1">
                   <span className={`block truncate ${active ? "font-bold" : "font-semibold"}`}>{s.name}</span>
