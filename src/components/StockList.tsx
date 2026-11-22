@@ -13,11 +13,11 @@ interface Props {
 }
 
 type View = "watch" | "all";
-type Sort = "rank" | "pUp" | "hit";
+type Sort = "rank" | "pUp" | "gap" | "hit" | "per" | "pbr" | "div";
 
 export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRemove }: Props) {
   const [view, setView] = useState<View>("watch");
-  const [sort, setSort] = useState<Sort>("pUp");
+  const [sort, setSort] = useState<Sort>("gap");
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -34,7 +34,13 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
   } else {
     rows = [...universe].sort((a, b) => {
       if (sort === "pUp") return (b.pUp ?? -1) - (a.pUp ?? -1);
+      if (sort === "gap") return (b.gapPUp ?? -1) - (a.gapPUp ?? -1);
       if (sort === "hit") return (b.hitRate ?? -1) - (a.hitRate ?? -1);
+      // 낮을수록 위 (적자 등으로 값이 없거나 음수면 맨 아래)
+      const low = (v: number | null) => (v === null || v <= 0 ? Infinity : v);
+      if (sort === "per") return low(a.per) - low(b.per);
+      if (sort === "pbr") return low(a.pbr) - low(b.pbr);
+      if (sort === "div") return (b.dividendYield ?? -1) - (a.dividendYield ?? -1);
       return b.marketValue - a.marketValue;
     });
   }
@@ -133,8 +139,12 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
               onChange={(e) => setSort(e.target.value as Sort)}
               className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 text-[15px]"
             >
-              <option value="pUp">상승 확률 높은 순</option>
+              <option value="gap">시가 상승 확률 높은 순</option>
+              <option value="pUp">종가 상승 확률 높은 순</option>
               <option value="hit">과거 적중률 높은 순</option>
+              <option value="per">PER 낮은 순</option>
+              <option value="pbr">PBR 낮은 순</option>
+              <option value="div">배당수익률 높은 순</option>
               <option value="rank">시가총액 순</option>
             </select>
           </div>
@@ -144,7 +154,10 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
       <div className="mt-3 flex border-y border-slate-100 bg-slate-50 px-4 py-1.5 text-xs text-slate-600">
         <span className="flex-1">종목</span>
         <span className="w-24 text-right">종가</span>
-        <span className="w-16 text-right" title="다음 거래일 상승 확률">상승확률</span>
+        <span className="w-16 text-right leading-tight">
+          상승 확률
+          <span className="block">시가/종가</span>
+        </span>
         <span className="w-11" aria-hidden />
       </div>
       <ul className="divide-y divide-slate-100">
@@ -153,32 +166,45 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
           const active = s.code === selected;
           const inWatch = watchSet.has(s.code);
           return (
-            <li key={s.code} className={`flex items-stretch ${active ? "bg-slate-50" : ""}`}>
+            <li key={s.code} className={`flex items-stretch ${active ? "bg-slate-100" : ""}`}>
               <button
                 type="button"
                 onClick={() => onSelect(s.code)}
                 aria-current={active ? "true" : undefined}
-                className={`flex min-h-14 min-w-0 flex-1 items-center gap-2 py-2 text-left ${active ? "border-l-4 border-slate-900 pl-3" : "pl-4"}`}
+                className="flex min-h-14 min-w-0 flex-1 items-center gap-2 py-2 pl-4 text-left hover:bg-slate-50"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{s.name}</span>
-                  <span className="num block text-sm text-slate-500">
-                    {s.code} · {s.market === "KOSDAQ" ? "코스닥" : "코스피"}
+                  <span className={`block truncate ${active ? "font-bold" : "font-semibold"}`}>{s.name}</span>
+                  <span className="num block truncate text-sm text-slate-600">
+                    {view === "all" && (sort === "per" || sort === "pbr" || sort === "div")
+                      ? (() => {
+                          // 정렬 기준 지표를 맨 앞에 (좁은 화면에서 잘려도 보이도록)
+                          const parts = {
+                            per: `PER ${s.per !== null ? `${s.per.toFixed(1)}배` : "—"}`,
+                            pbr: `PBR ${s.pbr !== null ? `${s.pbr.toFixed(2)}배` : "—"}`,
+                            div: `배당 ${s.dividendYield !== null ? `${s.dividendYield.toFixed(2)}%` : "—"}`,
+                          };
+                          return [parts[sort], ...Object.entries(parts).filter(([k]) => k !== sort).map(([, v]) => v)].join(" · ");
+                        })()
+                      : `${s.code} · ${s.market === "KOSDAQ" ? "코스닥" : "코스피"}`}
                   </span>
                 </span>
                 <span className="w-24 text-right">
                   <span className="num block text-[15px] font-semibold">{won(s.close)}</span>
                   <span className={`num block text-sm ${toneText(s.changeRate)}`}>{pct(s.changeRate)}</span>
                 </span>
-                <span className={`num w-16 text-right text-[15px] font-semibold ${s.pUp === null ? "text-slate-400" : toneProb(s.pUp)}`}>
-                  {s.pUp === null ? "—" : prob(s.pUp)}
+                <span className="num w-16 text-right">
+                  <span className={`block text-[15px] font-semibold ${s.gapPUp === null ? "text-slate-500" : toneProb(s.gapPUp)}`}>
+                    {s.gapPUp === null ? "—" : prob(s.gapPUp)}
+                  </span>
+                  <span className={`block text-sm ${s.pUp === null ? "text-slate-500" : toneProb(s.pUp)}`}>{s.pUp === null ? "—" : prob(s.pUp)}</span>
                 </span>
               </button>
               {view === "watch" ? (
                 <button
                   type="button"
                   onClick={() => askRemove(s.code)}
-                  className={`flex w-11 shrink-0 items-center justify-center text-sm ${confirming === s.code ? "bg-red-600 font-semibold text-white" : "text-slate-400 hover:text-slate-700"}`}
+                  className={`flex w-11 shrink-0 items-center justify-center text-sm ${confirming === s.code ? "bg-red-600 font-semibold text-white" : "text-slate-500 hover:text-slate-800"}`}
                   aria-label={confirming === s.code ? `${s.name} 삭제 확인` : `${s.name} 관심 종목에서 빼기`}
                 >
                   {confirming === s.code ? "삭제" : <Trash2 className="size-4" aria-hidden />}
@@ -191,7 +217,7 @@ export function StockList({ universe, watchlist, selected, onSelect, onAdd, onRe
                   aria-label={inWatch ? `${s.name} 관심 종목에서 빼기` : `${s.name} 관심 종목에 추가`}
                   className="flex w-11 shrink-0 items-center justify-center"
                 >
-                  <Star className={`size-5 ${inWatch ? "fill-amber-400 text-amber-500" : "text-slate-300"}`} aria-hidden />
+                  <Star className={`size-5 ${inWatch ? "fill-amber-400 text-amber-600" : "text-slate-400"}`} aria-hidden />
                 </button>
               )}
             </li>

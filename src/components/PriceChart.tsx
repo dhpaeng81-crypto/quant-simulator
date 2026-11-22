@@ -2,8 +2,8 @@ import type { DailyRow } from "../../shared/types";
 import { shortDate, won } from "../lib/format";
 
 const W = 600;
-const H = 220;
-const PAD = { top: 16, right: 64, bottom: 28, left: 8 };
+const H = 240;
+const PAD = { top: 28, right: 96, bottom: 40, left: 8 };
 
 /** 최근 종가와 다음 거래일 예상 범위(기대값 ± 표준편차 1개, 약 68%) */
 export function PriceChart({ history, expectedReturn, sigma }: { history: DailyRow[]; expectedReturn: number | null; sigma: number | null }) {
@@ -41,6 +41,22 @@ export function PriceChart({ history, expectedReturn, sigma }: { history: DailyR
         {[0.25, 0.5, 0.75].map((t) => (
           <line key={t} x1={PAD.left} x2={W - PAD.right} y1={PAD.top + t * (H - PAD.top - PAD.bottom)} y2={PAD.top + t * (H - PAD.top - PAD.bottom)} stroke="#f1f5f9" />
         ))}
+        {(() => {
+          const closes = rows.map((r) => r.close);
+          const maxI = closes.indexOf(Math.max(...closes));
+          const minI = closes.indexOf(Math.min(...closes));
+          const anchor = (i: number) => (i < rows.length * 0.15 ? "start" : i > rows.length * 0.85 ? "end" : "middle");
+          return (
+            <>
+              <text x={x(maxI)} y={y(closes[maxI]) - 8} fontSize={18} fill="#475569" textAnchor={anchor(maxI)}>
+                {Math.round(closes[maxI]).toLocaleString("ko-KR")}
+              </text>
+              <text x={x(minI)} y={y(closes[minI]) + 22} fontSize={18} fill="#475569" textAnchor={anchor(minI)}>
+                {Math.round(closes[minI]).toLocaleString("ko-KR")}
+              </text>
+            </>
+          );
+        })()}
         <path d={line} fill="none" stroke="#0f172a" strokeWidth={2} strokeLinejoin="round" />
         <circle cx={lastX} cy={y(last)} r={3.5} fill="#0f172a" />
         {band && (
@@ -52,21 +68,21 @@ export function PriceChart({ history, expectedReturn, sigma }: { history: DailyR
             />
             <line x1={lastX} y1={y(last)} x2={nextX} y2={y(band.mid)} stroke={bandColor} strokeWidth={2} strokeDasharray="5 4" />
             <line x1={nextX} x2={nextX} y1={y(band.hi)} y2={y(band.lo)} stroke={bandColor} strokeWidth={2} />
-            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={13} fill="#475569">
+            <text x={nextX + 6} y={y(band.hi) + 4} fontSize={20} fill="#475569">
               {Math.round(band.hi).toLocaleString("ko-KR")}
             </text>
-            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={13} fill="#475569">
+            <text x={nextX + 6} y={y(band.lo) + 4} fontSize={20} fill="#475569">
               {Math.round(band.lo).toLocaleString("ko-KR")}
             </text>
           </>
         )}
         {ticks.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} fontSize={13} fill="#64748b" textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}>
+          <text key={i} x={x(i)} y={H - 6} fontSize={20} fill="#64748b" textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}>
             {shortDate(rows[i].date)}
           </text>
         ))}
         {band && (
-          <text x={nextX} y={H - 8} fontSize={13} fill="#64748b" textAnchor="middle">
+          <text x={nextX} y={H - 6} fontSize={20} fill="#64748b" textAnchor="middle">
             다음
           </text>
         )}

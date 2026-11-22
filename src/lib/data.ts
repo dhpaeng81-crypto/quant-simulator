@@ -1,4 +1,4 @@
-import type { IndexFile, StockDetail } from "../../shared/types";
+import type { EvaluationFile, IndexFile, StockDetail } from "../../shared/types";
 
 // 정적 파일. 사이트가 하위 경로(GitHub Pages)에 있어도 동작하도록 상대 경로를 씁니다.
 const BASE = `${import.meta.env.BASE_URL}data`;
@@ -21,3 +21,5 @@ export function loadStock(code: string) {
   }
   return p;
 }
+
+export const loadEvaluation = () => load<EvaluationFile>("evaluation.json");

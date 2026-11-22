@@ -3,12 +3,21 @@
 import type { Bar } from "../../shared/types";
 import { getJson } from "../http";
 
-export const MACRO_SYMBOLS = { nasdaq: "^IXIC", sox: "^SOX", fx: "KRW=X", oil: "CL=F" } as const;
+export const MACRO_SYMBOLS = {
+  nasdaq: "^IXIC",
+  sox: "^SOX",
+  ewy: "EWY",
+  vix: "^VIX",
+  us10y: "^TNX",
+  dxy: "DX-Y.NYB",
+  fx: "KRW=X",
+  oil: "CL=F",
+} as const;
 
 const localDate = (ts: number, tz: string) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000));
 
-export async function yahooDaily(symbol: string, range = "2y"): Promise<Bar[]> {
+export async function yahooDaily(symbol: string, range = "5y"): Promise<Bar[]> {
   let lastErr: unknown;
   for (const host of ["query1", "query2"]) {
     try {

@@ -1,9 +1,10 @@
-import { AlertTriangle, BarChart3, List, SlidersHorizontal } from "lucide-react";
+import { BarChart3, ChevronLeft, ClipboardCheck, List, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { FEATURE_LABELS, forecast } from "../shared/model";
-import { FEATURE_KEYS, type Features, type IndexFile, type StockDetail } from "../shared/types";
+import { forecast } from "../shared/model";
+import { FEATURE_KEYS, TARGETS, type Features, type ForecastResult, type IndexFile, type StockDetail, type Target } from "../shared/types";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { BriefingCard } from "./components/BriefingCard";
+import { EvaluationPanel } from "./components/EvaluationPanel";
 import { ForecastPanel } from "./components/ForecastPanel";
 import { ScenarioPanel } from "./components/ScenarioPanel";
 import { StockList } from "./components/StockList";
@@ -13,6 +14,16 @@ import { dateTimeKo } from "./lib/format";
 import { loadWatchlist, saveWatchlist } from "./lib/storage";
 
 type MobileTab = "stocks" | "scenario" | "report";
+
+function Skeleton() {
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4" aria-busy="true" aria-label="불러오는 중">
+      {[40, 64, 100, 100, 72].map((w, i) => (
+        <div key={i} className="h-5 rounded bg-slate-100 motion-safe:animate-pulse" style={{ width: `${w}%` }} />
+      ))}
+    </div>
+  );
+}
 
 const codeFromHash = () => /^#(\d{6})$/.exec(window.location.hash)?.[1] ?? null;
 
@@ -25,6 +36,7 @@ export default function App() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<Features | null>(null);
   const [tab, setTab] = useState<"forecast" | "backtest">("forecast");
+  const [page, setPage] = useState<"main" | "evaluation">(() => (window.location.hash === "#evaluation" ? "evaluation" : "main"));
   const [mobileTab, setMobileTab] = useState<MobileTab>("report");
 
   useEffect(() => {
@@ -61,7 +73,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selected) return;
-    if (window.location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
+    if (window.location.hash !== "#evaluation" && window.location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
     let cancelled = false;
     setDetailError(null);
     loadStock(selected)
@@ -77,12 +89,22 @@ export default function App() {
   }, [selected]);
 
   const current = detail && detail.code === selected ? detail : null;
-  const result = useMemo(() => (current?.model && scenario ? forecast(current.model, scenario) : null), [current, scenario]);
+  const results = useMemo(() => {
+    const out = {} as Record<Target, ForecastResult | null>;
+    for (const t of TARGETS) {
+      const m = current?.[t].model;
+      out[t] = m && scenario ? forecast(m, scenario, index?.calibration[t] ?? null) : null;
+    }
+    return out;
+  }, [current, scenario, index]);
   const isScenario = Boolean(current?.latestInputs && scenario && FEATURE_KEYS.some((k) => scenario[k] !== current.latestInputs![k]));
-  const outliers =
-    current?.model && scenario
-      ? FEATURE_KEYS.filter((k) => current.model!.sd[k] > 0 && Math.abs((scenario[k] - current.model!.mean[k]) / current.model!.sd[k]) > 3)
-      : [];
+  // 학습 기간 평균에서 3 표준편차 넘게 벗어난 입력 (이 모델이 실제로 쓰는 입력만)
+  const outliers = FEATURE_KEYS.filter((k) =>
+    TARGETS.some((t) => {
+      const m = current?.[t].model;
+      return Boolean(m && scenario && m.coef[k] !== 0 && m.sd[k] > 0 && Math.abs(scenario[k] - m.mean[k]) > 3 * m.sd[k]);
+    }),
+  );
 
   const select = (code: string) => {
     setSelected(code);
@@ -92,6 +114,11 @@ export default function App() {
   const add = (code: string) => setWatchlist((w) => (w && !w.includes(code) ? [...w, code] : w));
   const remove = (code: string) => setWatchlist((w) => (w ? w.filter((c) => c !== code) : w));
   const hidden = (t: MobileTab) => (mobileTab === t ? "" : "hidden lg:block");
+  const openPage = (p: "main" | "evaluation") => {
+    setPage(p);
+    history.replaceState(null, "", p === "evaluation" ? "#evaluation" : selected ? `#${selected}` : "#");
+    window.scrollTo({ top: 0 });
+  };
 
   if (indexError) {
     return (
@@ -110,15 +137,49 @@ export default function App() {
       <TickerBar macro={index.macro} />
 
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-3">
-          <h1 className="text-lg font-bold sm:text-xl">다음 거래일 전망</h1>
-          <p className="text-sm text-slate-500">
-            시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
-          </p>
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold text-balance sm:text-xl">
+              {page === "evaluation" ? (
+                <button type="button" onClick={() => openPage("main")} className="hover:underline">
+                  다음 거래일 전망
+                </button>
+              ) : (
+                "다음 거래일 전망"
+              )}
+            </h1>
+            <p className="text-sm text-slate-600">
+              시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => openPage(page === "evaluation" ? "main" : "evaluation")}
+            aria-pressed={page === "evaluation"}
+            className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold ${
+              page === "evaluation" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <ClipboardCheck className="size-4" aria-hidden />
+            모델 성적표
+          </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-4 px-4 py-4">
+      {page === "evaluation" && (
+        <main className="mx-auto max-w-3xl px-4 py-4">
+          <button
+            type="button"
+            onClick={() => openPage("main")}
+            className="mb-3 flex min-h-11 items-center gap-1 text-[15px] font-medium text-slate-700 hover:text-slate-900"
+          >
+            <ChevronLeft className="size-4" aria-hidden /> 전망으로 돌아가기
+          </button>
+          <EvaluationPanel />
+        </main>
+      )}
+
+      <main className={`mx-auto max-w-7xl space-y-4 px-4 py-4 ${page === "evaluation" ? "hidden" : ""}`}>
         <div className={hidden("report")}>
           <BriefingCard briefing={index.briefing} note={index.nextTradingDayNote} />
         </div>
@@ -129,8 +190,8 @@ export default function App() {
               <StockList universe={index.stocks} watchlist={watchlist} selected={selected} onSelect={select} onAdd={add} onRemove={remove} />
             </div>
             <div className={hidden("scenario")}>
-              {current?.model && current.latestInputs && scenario ? (
-                <ScenarioPanel model={current.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
+              {current?.close.model && current.latestInputs && scenario ? (
+                <ScenarioPanel model={current.close.model} actual={current.latestInputs} asOf={current.inputsAsOf} value={scenario} onChange={setScenario} />
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-white p-4 text-[15px] text-slate-600">
                   {current ? "이 종목은 시나리오를 계산할 모델이 없습니다." : "종목을 고르면 시나리오를 바꿔 볼 수 있습니다."}
@@ -160,30 +221,21 @@ export default function App() {
               ))}
             </div>
 
-            {detailError && <p className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">{detailError}</p>}
-            {!current && !detailError && <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">불러오는 중…</div>}
-
-            {current && tab === "forecast" && (
-              <>
-                {outliers.length > 0 && (
-                  <div role="note" className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-950">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                    <p>
-                      {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의
-                      학습하지 못해 확률이 과장될 수 있습니다.
-                    </p>
-                  </div>
-                )}
-                <ForecastPanel stock={current} result={result} isScenario={isScenario} />
-              </>
+            {detailError && (
+              <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">
+                {detailError}
+              </p>
             )}
-            {current && tab === "backtest" && <BacktestPanel data={current.backtest} name={current.name} />}
+            {!current && !detailError && <Skeleton />}
+
+            {current && tab === "forecast" && <ForecastPanel stock={current} results={results} isScenario={isScenario} outliers={outliers} />}
+            {current && tab === "backtest" && <BacktestPanel stock={current} />}
           </div>
         </div>
       </main>
 
       <footer className="mx-auto max-w-7xl px-4 pt-4 pb-8 text-sm leading-relaxed text-slate-500">
-        <p>종목마다 최근 1년 데이터로 학습한 통계 모델의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
+        <p>최근 1년 데이터로 학습한 통계 모델({index.model.name})의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
         <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 하루 두 번 갱신.</p>
       </footer>
 
@@ -201,10 +253,11 @@ export default function App() {
               type="button"
               onClick={() => {
                 setMobileTab(key);
-                window.scrollTo({ top: 0 });
+                if (page === "evaluation") openPage("main");
+                else window.scrollTo({ top: 0 });
               }}
-              aria-current={mobileTab === key ? "page" : undefined}
-              className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-sm ${mobileTab === key ? "font-semibold text-slate-900" : "text-slate-500"}`}
+              aria-current={page === "main" && mobileTab === key ? "page" : undefined}
+              className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-sm ${page === "main" && mobileTab === key ? "font-semibold text-slate-900" : "text-slate-600"}`}
             >
               <Icon className="size-5" aria-hidden />
               {label}
