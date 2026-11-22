@@ -1,6 +1,6 @@
-import { AlertTriangle, BarChart3, List, SlidersHorizontal } from "lucide-react";
+import { BarChart3, ChevronLeft, ClipboardCheck, List, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { FEATURE_LABELS, forecast } from "../shared/model";
+import { forecast } from "../shared/model";
 import { FEATURE_KEYS, TARGETS, type Features, type ForecastResult, type IndexFile, type StockDetail, type Target } from "../shared/types";
 import { BacktestPanel } from "./components/BacktestPanel";
 import { BriefingCard } from "./components/BriefingCard";
@@ -15,6 +15,16 @@ import { loadWatchlist, saveWatchlist } from "./lib/storage";
 
 type MobileTab = "stocks" | "scenario" | "report";
 
+function Skeleton() {
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4" aria-busy="true" aria-label="불러오는 중">
+      {[40, 64, 100, 100, 72].map((w, i) => (
+        <div key={i} className="h-5 rounded bg-slate-100 motion-safe:animate-pulse" style={{ width: `${w}%` }} />
+      ))}
+    </div>
+  );
+}
+
 const codeFromHash = () => /^#(\d{6})$/.exec(window.location.hash)?.[1] ?? null;
 
 export default function App() {
@@ -25,7 +35,8 @@ export default function App() {
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [scenario, setScenario] = useState<Features | null>(null);
-  const [tab, setTab] = useState<"forecast" | "backtest" | "evaluation">("forecast");
+  const [tab, setTab] = useState<"forecast" | "backtest">("forecast");
+  const [page, setPage] = useState<"main" | "evaluation">(() => (window.location.hash === "#evaluation" ? "evaluation" : "main"));
   const [mobileTab, setMobileTab] = useState<MobileTab>("report");
 
   useEffect(() => {
@@ -62,7 +73,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selected) return;
-    if (window.location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
+    if (window.location.hash !== "#evaluation" && window.location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
     let cancelled = false;
     setDetailError(null);
     loadStock(selected)
@@ -94,7 +105,6 @@ export default function App() {
       return Boolean(m && scenario && m.coef[k] !== 0 && m.sd[k] > 0 && Math.abs(scenario[k] - m.mean[k]) > 3 * m.sd[k]);
     }),
   );
-  const anyClipped = Boolean(results.close?.clipped.length || results.gap?.clipped.length);
 
   const select = (code: string) => {
     setSelected(code);
@@ -104,6 +114,11 @@ export default function App() {
   const add = (code: string) => setWatchlist((w) => (w && !w.includes(code) ? [...w, code] : w));
   const remove = (code: string) => setWatchlist((w) => (w ? w.filter((c) => c !== code) : w));
   const hidden = (t: MobileTab) => (mobileTab === t ? "" : "hidden lg:block");
+  const openPage = (p: "main" | "evaluation") => {
+    setPage(p);
+    history.replaceState(null, "", p === "evaluation" ? "#evaluation" : selected ? `#${selected}` : "#");
+    window.scrollTo({ top: 0 });
+  };
 
   if (indexError) {
     return (
@@ -122,15 +137,49 @@ export default function App() {
       <TickerBar macro={index.macro} />
 
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-3">
-          <h1 className="text-lg font-bold sm:text-xl">다음 거래일 전망</h1>
-          <p className="text-sm text-slate-500">
-            시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
-          </p>
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold text-balance sm:text-xl">
+              {page === "evaluation" ? (
+                <button type="button" onClick={() => openPage("main")} className="hover:underline">
+                  다음 거래일 전망
+                </button>
+              ) : (
+                "다음 거래일 전망"
+              )}
+            </h1>
+            <p className="text-sm text-slate-600">
+              시가총액 상위 {index.stocks.length}개 종목 · {dateTimeKo(index.generatedAt)} 갱신
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => openPage(page === "evaluation" ? "main" : "evaluation")}
+            aria-pressed={page === "evaluation"}
+            className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold ${
+              page === "evaluation" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <ClipboardCheck className="size-4" aria-hidden />
+            모델 성적표
+          </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-4 px-4 py-4">
+      {page === "evaluation" && (
+        <main className="mx-auto max-w-3xl px-4 py-4">
+          <button
+            type="button"
+            onClick={() => openPage("main")}
+            className="mb-3 flex min-h-11 items-center gap-1 text-[15px] font-medium text-slate-700 hover:text-slate-900"
+          >
+            <ChevronLeft className="size-4" aria-hidden /> 전망으로 돌아가기
+          </button>
+          <EvaluationPanel />
+        </main>
+      )}
+
+      <main className={`mx-auto max-w-7xl space-y-4 px-4 py-4 ${page === "evaluation" ? "hidden" : ""}`}>
         <div className={hidden("report")}>
           <BriefingCard briefing={index.briefing} note={index.nextTradingDayNote} />
         </div>
@@ -152,12 +201,11 @@ export default function App() {
           </div>
 
           <div className={`min-w-0 space-y-4 lg:col-span-7 ${hidden("report")}`}>
-            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-3 rounded-xl border border-slate-200 bg-white p-1">
+            <div role="tablist" aria-label="보기 선택" className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
               {(
                 [
                   ["forecast", "전망"],
                   ["backtest", "과거 성적"],
-                  ["evaluation", "모델 성적표"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -173,24 +221,14 @@ export default function App() {
               ))}
             </div>
 
-            {tab === "evaluation" && <EvaluationPanel />}
-            {tab !== "evaluation" && detailError && <p className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">{detailError}</p>}
-            {tab !== "evaluation" && !current && !detailError && <div className="rounded-xl border border-slate-200 bg-white p-6 text-[15px] text-slate-600">불러오는 중…</div>}
-
-            {current && tab === "forecast" && (
-              <>
-                {outliers.length > 0 && (
-                  <div role="note" className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-950">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                    <p>
-                      {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의
-                      학습하지 못해 확률이 실제보다 극단적으로 나올 수 있습니다{anyClipped ? " (너무 큰 값은 상한까지만 반영)" : ""}.
-                    </p>
-                  </div>
-                )}
-                <ForecastPanel stock={current} results={results} isScenario={isScenario} />
-              </>
+            {detailError && (
+              <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-800">
+                {detailError}
+              </p>
             )}
+            {!current && !detailError && <Skeleton />}
+
+            {current && tab === "forecast" && <ForecastPanel stock={current} results={results} isScenario={isScenario} outliers={outliers} />}
             {current && tab === "backtest" && <BacktestPanel stock={current} />}
           </div>
         </div>
@@ -215,10 +253,11 @@ export default function App() {
               type="button"
               onClick={() => {
                 setMobileTab(key);
-                window.scrollTo({ top: 0 });
+                if (page === "evaluation") openPage("main");
+                else window.scrollTo({ top: 0 });
               }}
-              aria-current={mobileTab === key ? "page" : undefined}
-              className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-sm ${mobileTab === key ? "font-semibold text-slate-900" : "text-slate-500"}`}
+              aria-current={page === "main" && mobileTab === key ? "page" : undefined}
+              className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-sm ${page === "main" && mobileTab === key ? "font-semibold text-slate-900" : "text-slate-600"}`}
             >
               <Icon className="size-5" aria-hidden />
               {label}

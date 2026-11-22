@@ -122,6 +122,53 @@ export interface StockSummary {
   gapPUp: number | null; // 다음 거래일 시가 상승 출발 확률
   expectedGap: number | null;
   hitRate: number | null; // 종가 백테스트 적중률
+  per: number | null;
+  pbr: number | null;
+  dividendYield: number | null;
+}
+
+/** 현재 투자 지표 (네이버 증권 기준, 수집 시점) */
+export interface Valuation {
+  per: number | null; // 배 (최근 4개 분기 이익 기준)
+  cnsPer: number | null; // 배 (증권사 추정 이익 기준)
+  pbr: number | null; // 배
+  eps: number | null; // 원
+  bps: number | null; // 원
+  dividendYield: number | null; // %
+  dps: number | null; // 주당배당금 (원)
+  payoutRatio: number | null; // 배당성향 % (최근 결산 주당배당금 ÷ 주당순이익)
+  roe: number | null; // % (최근 결산)
+  debtRatio: number | null; // % (최근 결산)
+  opMargin: number | null; // 영업이익률 % (최근 결산)
+  high52: number | null;
+  low52: number | null;
+  foreignOwnership: number | null; // 외국인 소진율 %
+  targetPrice: number | null; // 증권사 평균 목표주가 (원)
+  targetDate: string | null; // 목표가 집계일
+  fiscalYear: string | null; // 결산 지표의 기준 연도 (예: 2025.12)
+}
+
+/** 연간 실적 (억 원, %, 원, 배) */
+export interface AnnualRow {
+  period: string; // 2025.12
+  estimate: boolean; // 증권사 추정치 여부
+  revenue: number | null;
+  operatingIncome: number | null;
+  netIncome: number | null;
+  opMargin: number | null;
+  roe: number | null;
+  debtRatio: number | null;
+  eps: number | null;
+  per: number | null;
+  bps: number | null;
+  pbr: number | null;
+  dps: number | null;
+  payoutRatio: number | null;
+}
+
+export interface Fundamentals {
+  valuation: Valuation;
+  annual: AnnualRow[];
 }
 
 export interface StockDetail {
@@ -134,6 +181,7 @@ export interface StockDetail {
   close: TargetResult;
   gap: TargetResult;
   news: NewsItem[];
+  fundamentals: Fundamentals | null;
   notes: string[];
 }
 

@@ -1,6 +1,6 @@
 // 네이버 증권 (키 불필요). 비공식 엔드포인트라 형식이 바뀌면 여기서 오류가 납니다.
 
-import type { Bar, DailyRow, Market, NewsItem } from "../../shared/types";
+import type { AnnualRow, Bar, DailyRow, Fundamentals, Market, NewsItem, Valuation } from "../../shared/types";
 import { getJson, getText } from "../http";
 
 const num = (s: unknown) => Number(String(s ?? "").replace(/[,+%\s]/g, ""));
@@ -103,3 +103,80 @@ export async function stockNews(code: string, count = 3): Promise<NewsItem[]> {
 
 export const indexBars = async (symbol: "KOSPI" | "KOSDAQ", count = 5): Promise<Bar[]> =>
   (await dailyPrices(symbol, count)).map(({ date, close }) => ({ date, close }));
+
+// ── 재무·투자 지표 ──────────────────────────────────────────────
+
+
+/** "5.69배", "1,668원", "0.92%", "-", "N/A" → 숫자 또는 null */
+const metric = (v: unknown): number | null => {
+  const s = String(v ?? "").replace(/[,배원%\s]/g, "");
+  if (!s || s === "-" || /N\/A/i.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+
+const payout = (dps: number | null, eps: number | null) =>
+  dps !== null && eps !== null && eps > 0 ? Math.round((dps / eps) * 1000) / 10 : null;
+
+export async function fundamentals(code: string): Promise<Fundamentals> {
+  const [integ, annual] = await Promise.all([
+    getJson(`https://m.stock.naver.com/api/stock/${code}/integration`),
+    getJson(`https://m.stock.naver.com/api/stock/${code}/finance/annual`),
+  ]);
+
+  const info = new Map<string, unknown>((integ?.totalInfos ?? []).map((t: any) => [t.code, t.value]));
+  const fi = annual?.financeInfo ?? {};
+  const periods: Array<{ key: string; title: string; estimate: boolean }> = (fi.trTitleList ?? []).map((t: any) => ({
+    key: String(t.key),
+    title: String(t.title ?? t.key).replace(/\.$/, ""),
+    estimate: t.isConsensus === "Y",
+  }));
+  const rows = new Map<string, Record<string, unknown>>(
+    (fi.rowList ?? []).map((r: any) => [String(r.title), Object.fromEntries(Object.entries(r.columns ?? {}).map(([k, v]: [string, any]) => [k, v?.value]))]),
+  );
+  const cell = (title: string, key: string) => metric(rows.get(title)?.[key]);
+
+  const annualRows: AnnualRow[] = periods.map((p) => {
+    const eps = cell("EPS", p.key);
+    const dps = cell("주당배당금", p.key);
+    return {
+      period: p.title,
+      estimate: p.estimate,
+      revenue: cell("매출액", p.key),
+      operatingIncome: cell("영업이익", p.key),
+      netIncome: cell("당기순이익", p.key),
+      opMargin: cell("영업이익률", p.key),
+      roe: cell("ROE", p.key),
+      debtRatio: cell("부채비율", p.key),
+      eps,
+      per: cell("PER", p.key),
+      bps: cell("BPS", p.key),
+      pbr: cell("PBR", p.key),
+      dps,
+      payoutRatio: payout(dps, eps),
+    };
+  });
+
+  const lastActual = [...annualRows].reverse().find((r) => !r.estimate) ?? null;
+  const cons = integ?.consensusInfo;
+  const valuation: Valuation = {
+    per: metric(info.get("per")),
+    cnsPer: metric(info.get("cnsPer")),
+    pbr: metric(info.get("pbr")),
+    eps: metric(info.get("eps")),
+    bps: metric(info.get("bps")),
+    dividendYield: metric(info.get("dividendYieldRatio")),
+    dps: metric(info.get("dividend")),
+    payoutRatio: lastActual?.payoutRatio ?? null,
+    roe: lastActual?.roe ?? null,
+    debtRatio: lastActual?.debtRatio ?? null,
+    opMargin: lastActual?.opMargin ?? null,
+    high52: metric(info.get("highPriceOf52Weeks")),
+    low52: metric(info.get("lowPriceOf52Weeks")),
+    foreignOwnership: metric(info.get("foreignRate")),
+    targetPrice: metric(cons?.priceTargetMean),
+    targetDate: cons?.createDate ? String(cons.createDate) : null,
+    fiscalYear: lastActual?.period ?? null,
+  };
+  return { valuation, annual: annualRows };
+}

@@ -40,7 +40,7 @@ import {
   type TargetResult,
 } from "../shared/types";
 import { aiBriefing } from "./sources/gemini";
-import { indexBars, stockNews, stockRows, topByMarketValue, type RankedStock } from "./sources/naver";
+import { fundamentals, indexBars, stockNews, stockRows, topByMarketValue, type RankedStock } from "./sources/naver";
 import { MACRO_SYMBOLS, yahooDaily } from "./sources/yahoo";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -65,7 +65,7 @@ interface Raw {
   macro: MacroSeries;
   kospi: Bar[];
   kosdaq: Bar[];
-  stocks: Array<RankedStock & { rows: DailyRow[]; news: StockDetail["news"] }>;
+  stocks: Array<RankedStock & { rows: DailyRow[]; news: StockDetail["news"]; fundamentals?: StockDetail["fundamentals"] }>;
   failures: string[];
 }
 
@@ -97,8 +97,12 @@ async function fetchRaw(): Promise<Raw> {
       const rows = await stockRows(s.code);
       if (rows.length < 30) throw new Error("시세 부족");
       const news = await stockNews(s.code).catch(() => []);
+      const fund = await fundamentals(s.code).catch((e) => {
+        console.warn(`\n[재무 지표 없음] ${s.code}: ${(e as Error).message}`);
+        return null;
+      });
       process.stdout.write(".");
-      return { ...s, rows, news };
+      return { ...s, rows, news, fundamentals: fund };
     } catch (e) {
       failures.push(s.code);
       console.warn(`\n[실패] ${s.code} ${s.name}: ${(e as Error).message}`);
@@ -260,6 +264,7 @@ async function main() {
       close: result.close,
       gap: result.gap,
       news: s.news,
+      fundamentals: s.fundamentals ?? null,
       notes,
     };
     await writeFile(path.join(OUT, "stocks", `${s.code}.json`), JSON.stringify(detail));
@@ -277,6 +282,9 @@ async function main() {
       gapPUp: result.gap.forecast?.pUp ?? null,
       expectedGap: result.gap.forecast?.expectedReturn ?? null,
       hitRate: result.close.backtest?.hitRate ?? null,
+      per: s.fundamentals?.valuation.per ?? null,
+      pbr: s.fundamentals?.valuation.pbr ?? null,
+      dividendYield: s.fundamentals?.valuation.dividendYield ?? null,
     });
     if (last.foreignNet !== null) flows.push({ name: s.name, value: (last.foreignNet * last.close) / 1e8 });
   }

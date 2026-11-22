@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { Briefing } from "../../shared/types";
 
 export function BriefingCard({ briefing, note }: { briefing: Briefing; note: string }) {
-  const [open, setOpen] = useState(true);
+  // 휴대폰에서는 접어서 시작 (첫 화면에 종목 전망이 보이도록), 넓은 화면에서는 펼침
+  const [open, setOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches);
   return (
     <section className="rounded-xl border border-slate-200 bg-white" aria-labelledby="briefing-title">
       <button
@@ -17,6 +18,7 @@ export function BriefingCard({ briefing, note }: { briefing: Briefing; note: str
         </h2>
         <ChevronDown className={`ml-auto size-5 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
+      {!open && briefing.facts[0] && <p className="-mt-1 px-4 pb-3 text-[15px] text-slate-700">{briefing.facts[0]}</p>}
       {open && (
         <div className="border-t border-slate-100 px-4 py-4 text-[15px] leading-relaxed">
           <ul className="list-disc space-y-1.5 pl-5">

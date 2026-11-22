@@ -1,19 +1,21 @@
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { FEATURE_LABELS } from "../../shared/model";
-import { FEATURE_KEYS, type ForecastResult, type StockDetail, type Target } from "../../shared/types";
+import { FEATURE_KEYS, type FeatureKey, type ForecastResult, type StockDetail, type Target } from "../../shared/types";
 import { pct, prob, probWords, signed, timeAgo, toneProb, toneText, won } from "../lib/format";
+import { FundamentalsPanel } from "./FundamentalsPanel";
 import { PriceChart } from "./PriceChart";
 
 interface Props {
   stock: StockDetail;
   results: Record<Target, ForecastResult | null>;
   isScenario: boolean;
+  outliers: FeatureKey[];
 }
 
 const TARGET_LABEL: Record<Target, string> = { close: "종가", gap: "시가" };
 
-export function ForecastPanel({ stock, results, isScenario }: Props) {
+export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
   const [copied, setCopied] = useState(false);
   const [factorTarget, setFactorTarget] = useState<Target>("close");
   const last = stock.history[stock.history.length - 1];
@@ -62,6 +64,17 @@ export function ForecastPanel({ stock, results, isScenario }: Props) {
           <span className={`num font-semibold ${toneText(change)}`}>{pct(change)}</span>
           <span className="text-sm text-slate-500">{last.date} 종가</span>
         </p>
+        {stock.fundamentals && (
+          <p className="num mt-1 text-sm text-slate-600">
+            {[
+              stock.fundamentals.valuation.per !== null && `PER ${stock.fundamentals.valuation.per.toFixed(1)}배`,
+              stock.fundamentals.valuation.pbr !== null && `PBR ${stock.fundamentals.valuation.pbr.toFixed(2)}배`,
+              stock.fundamentals.valuation.dividendYield !== null && `배당 ${stock.fundamentals.valuation.dividendYield.toFixed(2)}%`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        )}
 
         {close && gap ? (
           <>
@@ -89,20 +102,27 @@ export function ForecastPanel({ stock, results, isScenario }: Props) {
               <strong>시가</strong>는 밤사이 미국 시장 움직임이 대부분 반영돼 비교적 잘 맞는 편이고, <strong>종가</strong>는 장중 움직임이 섞여 50% 근처가
               정상입니다. 확률은 과거 사후 예측으로 보정한 값입니다.
             </p>
+            {outliers.length > 0 && (
+              <p role="note" className="mt-3 flex gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-[15px] text-amber-950">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <span>
+                  {outliers.map((k) => FEATURE_LABELS[k].name).join(", ")} 값이 지난 1년 평소 범위를 크게 벗어났습니다. 모델이 이런 날을 거의 학습하지
+                  못해 확률이 실제보다 극단적으로 나올 수 있습니다.
+                </span>
+              </p>
+            )}
           </>
         ) : (
           <p className="mt-4 rounded-lg bg-slate-100 p-4 text-[15px] text-slate-700">{stock.notes[0] ?? "이 종목은 전망을 계산하지 못했습니다."}</p>
         )}
-      </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="chart-title">
-        <h3 id="chart-title" className="text-base font-bold">
-          최근 60거래일과 다음 거래일 종가 예상 범위
-        </h3>
-        <div className="mt-3">
+        <h3 className="mt-6 text-[15px] font-semibold">최근 60거래일과 다음 거래일 종가 예상 범위</h3>
+        <div className="mt-2">
           <PriceChart history={stock.history} expectedReturn={close?.expectedReturn ?? null} sigma={closeModel?.sigma ?? null} />
         </div>
       </section>
+
+      <FundamentalsPanel data={stock.fundamentals} price={last.close} />
 
       {fr && fm && (
         <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="factors-title">
