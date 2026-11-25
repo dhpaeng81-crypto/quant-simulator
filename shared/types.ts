@@ -34,6 +34,8 @@ export type Target = (typeof TARGETS)[number];
 export interface DailyRow {
   date: string; // YYYY-MM-DD (한국 거래일)
   open: number;
+  high: number;
+  low: number;
   close: number;
   volume: number;
   foreignNet: number | null; // 외국인 순매수 수량(주)
@@ -207,6 +209,7 @@ export interface IndexFile {
   stocks: StockSummary[];
   briefing: Briefing;
   failures: string[]; // 수집에 실패한 종목 코드
+  rangeCheck?: import("./range").RangeCheck | null; // 예상 가격 범위의 과거 적중
 }
 
 /** 통합 평가 지표 (여러 종목·여러 날의 사후 예측을 합쳐서) */
@@ -250,4 +253,6 @@ export interface EvaluationFile {
   /** 평가 기간 전체(약 1년)의 월별 방향 적중률. 확률 보정과 무관(보정은 방향을 바꾸지 않음) */
   monthly: Record<Target, Array<{ month: string; hitRate: number; n: number }>>;
   evalStart: string;
+  /** '오늘 예상 가격 범위'가 과거(평가 뒤 절반)에 실제로 얼마나 맞았는지 */
+  rangeCheck: import("./range").RangeCheck | null;
 }

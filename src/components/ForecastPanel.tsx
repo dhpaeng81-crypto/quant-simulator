@@ -3,19 +3,22 @@ import { useState } from "react";
 import { FEATURE_LABELS } from "../../shared/model";
 import { FEATURE_KEYS, type FeatureKey, type ForecastResult, type StockDetail, type Target } from "../../shared/types";
 import { pct, prob, probWords, signed, timeAgo, toneProb, toneText, won } from "../lib/format";
+import { priceRange, type RangeCheck } from "../../shared/range";
 import { FundamentalsPanel } from "./FundamentalsPanel";
 import { PriceChart } from "./PriceChart";
+import { PriceRangePanel } from "./PriceRangePanel";
 
 interface Props {
   stock: StockDetail;
   results: Record<Target, ForecastResult | null>;
   isScenario: boolean;
   outliers: FeatureKey[];
+  rangeCheck?: RangeCheck | null;
 }
 
 const TARGET_LABEL: Record<Target, string> = { close: "종가", gap: "시가" };
 
-export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
+export function ForecastPanel({ stock, results, isScenario, outliers, rangeCheck }: Props) {
   const [copied, setCopied] = useState(false);
   const [factorTarget, setFactorTarget] = useState<Target>("close");
   const last = stock.history[stock.history.length - 1];
@@ -23,6 +26,7 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
   const change = prev ? (last.close / prev.close - 1) * 100 : 0;
   const close = results.close;
   const gap = results.gap;
+  const range = gap && stock.gap.model ? priceRange(stock.history, gap.expectedReturn, stock.gap.model.sigma) : null;
 
   const fr = results[factorTarget];
   const fm = stock[factorTarget].model;
@@ -114,6 +118,8 @@ export function ForecastPanel({ stock, results, isScenario, outliers }: Props) {
           <p className="mt-6 rounded-xl bg-slate-100 p-4 text-[15px] text-slate-700">{stock.notes[0] ?? "이 종목은 전망을 계산하지 못했습니다."}</p>
         )}
       </section>
+
+      {range && <PriceRangePanel range={range} check={rangeCheck} isScenario={isScenario} />}
 
       {/* 가격 차트 */}
       <section className="rounded-2xl bg-white p-5 sm:p-6" aria-labelledby="chart-title">

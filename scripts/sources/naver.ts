@@ -33,15 +33,14 @@ export async function topByMarketValue(market: Market, count: number): Promise<R
 }
 
 /** 일봉 (종가·거래량). symbol은 종목코드 또는 KOSPI/KOSDAQ */
-export async function dailyPrices(symbol: string, count = 600): Promise<Array<{ date: string; open: number; close: number; volume: number }>> {
+export async function dailyPrices(symbol: string, count = 600): Promise<Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>> {
   const xml = await getText(`https://fchart.stock.naver.com/sise.nhn?symbol=${symbol}&timeframe=day&count=${count}&requestType=0`);
-  const out: Array<{ date: string; open: number; close: number; volume: number }> = [];
+  const out: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> = [];
   for (const m of xml.matchAll(/<item data="(\d{8})\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^"]*)"/g)) {
-    const open = Number(m[2]);
+    const n = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
     const close = Number(m[5]);
-    const volume = Number(m[6]);
     if (Number.isFinite(close) && close > 0)
-      out.push({ date: ymd(m[1]), open: Number.isFinite(open) ? open : 0, close, volume: Number.isFinite(volume) ? volume : 0 });
+      out.push({ date: ymd(m[1]), open: n(m[2]), high: n(m[3]), low: n(m[4]), close, volume: n(m[6]) });
   }
   return out;
 }
@@ -69,7 +68,7 @@ export async function stockRows(code: string): Promise<DailyRow[]> {
   const [prices, flows] = await Promise.all([dailyPrices(code), investorFlows(code)]);
   return prices.map((p) => {
     const f = flows.get(p.date);
-    return { date: p.date, open: p.open, close: p.close, volume: p.volume, foreignNet: f?.foreign ?? null, institutionNet: f?.institution ?? null };
+    return { date: p.date, open: p.open, high: p.high, low: p.low, close: p.close, volume: p.volume, foreignNet: f?.foreign ?? null, institutionNet: f?.institution ?? null };
   });
 }
 
@@ -179,4 +178,21 @@ export async function fundamentals(code: string): Promise<Fundamentals> {
     fiscalYear: lastActual?.period ?? null,
   };
   return { valuation, annual: annualRows };
+}
+
+/** 1분 간격 가격(체결가)과 누적 거래량. 네이버는 최근 약 7거래일치를 줍니다 (정규장 + 대체거래소 시간외) */
+export type MinuteBar = [hhmm: number, price: number, cumVolume: number];
+export async function minuteBars(code: string): Promise<Map<string, MinuteBar[]>> {
+  const xml = await getText(`https://fchart.stock.naver.com/sise.nhn?symbol=${code}&timeframe=minute&count=5000&requestType=0`);
+  const days = new Map<string, MinuteBar[]>();
+  for (const m of xml.matchAll(/<item data="(\d{8})(\d{4})\|[^|]*\|[^|]*\|[^|]*\|([^|]*)\|([^"]*)"/g)) {
+    const price = Number(m[3]);
+    const vol = Number(m[4]);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const date = ymd(m[1]);
+    const list = days.get(date) ?? [];
+    list.push([Number(m[2]), price, Number.isFinite(vol) ? vol : 0]);
+    days.set(date, list);
+  }
+  return days;
 }

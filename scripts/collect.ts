@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildSamples, sortMacro, type MacroSeries, type Sample } from "../shared/features";
+import { checkRanges, priceRange } from "../shared/range";
 import {
   calibrationBins,
   DEFAULT_VARIANT,
@@ -160,6 +161,20 @@ async function main() {
     await mkdir(path.dirname(CACHE), { recursive: true });
     await writeFile(CACHE, JSON.stringify(raw));
     console.log(`수집 완료 ${elapsed(t0)}`);
+  }
+
+  // 장중에 수집하면 오늘 일봉이 아직 끝나지 않았고 수급도 없음 → 오늘 행은 빼고 '어제까지'로 계산
+  const nowKst = new Date(Date.now() + 9 * 3600_000);
+  const todayKst = nowKst.toISOString().slice(0, 10);
+  const marketClosed = nowKst.getUTCHours() * 60 + nowKst.getUTCMinutes() >= 15 * 60 + 40;
+  if (!marketClosed) {
+    let dropped = 0;
+    for (const st of raw.stocks) {
+      const before = st.rows.length;
+      st.rows = st.rows.filter((r) => r.date !== todayKst);
+      dropped += before - st.rows.length;
+    }
+    if (dropped) console.log(`장중 수집: 오늘(${todayKst}) 미완성 일봉 ${dropped}개 제외`);
   }
 
   // 표본
@@ -320,6 +335,20 @@ async function main() {
   };
   await writeFile(path.join(OUT, "index.json"), JSON.stringify(index));
 
+  // 예상 가격 범위 점검: 평가 뒤 절반의 사후 시가 예측으로, 그날 이전 데이터만 써서 범위를 만들고 실제와 비교
+  const rowsByCode = new Map(raw.stocks.map((st) => [st.code, [...st.rows].sort((a, b) => a.date.localeCompare(b.date))]));
+  const rangeItems = secondHalf(preds.get(`${chosen}:gap`)!).flatMap((p) => {
+    const rows = rowsByCode.get(p.code);
+    const i = rows ? rows.findIndex((r) => r.date === p.date) : -1;
+    if (!rows || i < 1) return [];
+    const range = priceRange(rows.slice(0, i), p.expected, p.sigma);
+    return range ? [{ range, actual: rows[i] }] : [];
+  });
+  const rangeCheck = checkRanges(rangeItems);
+  console.log(`가격 범위 점검: ${JSON.stringify(rangeCheck)}`);
+  index.rangeCheck = rangeCheck;
+  await writeFile(path.join(OUT, "index.json"), JSON.stringify(index));
+
   const evaluation: EvaluationFile = {
     generatedAt: index.generatedAt,
     testStart: split,
@@ -333,6 +362,7 @@ async function main() {
     ) as EvaluationFile["calibrationBins"],
     monthly: Object.fromEntries(TARGETS.map((t) => [t, monthlyHitRates(preds.get(`${chosen}:${t}`)!)])) as EvaluationFile["monthly"],
     evalStart: evalDates[0] ?? "",
+    rangeCheck,
   };
   await writeFile(path.join(OUT, "evaluation.json"), JSON.stringify(evaluation));
 

@@ -275,7 +275,7 @@ export default function App() {
             )}
             {!current && !detailError && <Skeleton />}
 
-            {current && tab === "forecast" && <ForecastPanel stock={current} results={results} isScenario={isScenario} outliers={outliers} />}
+            {current && tab === "forecast" && <ForecastPanel stock={current} results={results} isScenario={isScenario} outliers={outliers} rangeCheck={index.rangeCheck} />}
             {current && tab === "backtest" && <BacktestPanel stock={current} />}
           </div>
         </div>

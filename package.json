@@ -10,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "collect:minute": "tsx scripts/collect-minute.ts"
   },
   "engines": {
     "node": ">=20"
