@@ -50,3 +50,39 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # 분봉 쌓기: 끝난 거래일의 1분 가격을 minute-data 브랜치에 저장 (사이트 배포와 별개)
+  minute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 저장 브랜치 준비
+        run: |
+          if git ls-remote --exit-code --heads origin minute-data >/dev/null; then
+            git fetch --depth=1 origin minute-data:minute-data
+            git worktree add store minute-data
+          else
+            git worktree add --orphan -b minute-data store
+          fi
+      - name: 분봉 수집 (최근 7거래일 중 빠진 날만)
+        run: npm run collect:minute -- store
+      - name: 저장
+        run: |
+          cd store
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "새로 저장할 날 없음"
+          else
+            git commit -m "분봉 저장 $(date -u +%F)"
+            git push origin minute-data
+          fi

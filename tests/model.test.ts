@@ -57,7 +57,7 @@ function market(opts: { n?: number; gapBeta?: number; noise?: number; seed?: num
     const gap = i > 0 ? (opts.gapBeta ?? 0.5) * ewyChg[i - 1] + gauss(r) * 0.2 : 0;
     const open = px * (1 + gap / 100);
     const close = open * (1 + (gauss(r) * (opts.noise ?? 1)) / 100);
-    rows.push({ date: dates[i], open, close, volume: 1_000_000, foreignNet: Math.round(gauss(r) * 50_000), institutionNet: Math.round(gauss(r) * 30_000) });
+    rows.push({ date: dates[i], open, high: Math.max(open, close) * 1.005, low: Math.min(open, close) * 0.995, close, volume: 1_000_000, foreignNet: Math.round(gauss(r) * 50_000), institutionNet: Math.round(gauss(r) * 30_000) });
     px = close;
   }
   return { rows, macro, dates, ewyChg };
