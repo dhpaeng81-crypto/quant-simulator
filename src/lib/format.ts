@@ -32,12 +32,12 @@ export function probWords(p: number): string {
   return "하락 쪽으로 기움";
 }
 
-/** 다음 자동 갱신 시각 (평일 07:20, 16:40 KST). GitHub 예약 실행은 몇 분 늦을 수 있음 */
+/** 다음 자동 갱신 시각 (평일 08:05 장전, 16:40 장 마감 후 KST). 16:40은 GitHub 사정으로 늦어질 수 있음 */
 export function nextUpdateLabel(now = new Date()): string {
   const KST = 9 * 60 * 60 * 1000;
   const k = new Date(now.getTime() + KST); // UTC 필드로 KST 시각을 읽음
   const slots = [
-    [7, 20],
+    [8, 5],
     [16, 40],
   ];
   for (let add = 0; add < 8; add++) {
@@ -53,4 +53,12 @@ export function nextUpdateLabel(now = new Date()): string {
     }
   }
   return "";
+}
+
+/** 전망이 장 시작 전에 만들어졌는지 (한국 시각) */
+export function forecastTiming(generatedAt: string, targetDate: string | undefined): "preopen" | "late" | "previous" {
+  const k = new Date(new Date(generatedAt).getTime() + 9 * 3600_000);
+  const day = k.toISOString().slice(0, 10);
+  if (!targetDate || day < targetDate) return "previous";
+  return k.getUTCHours() < 9 ? "preopen" : "late";
 }

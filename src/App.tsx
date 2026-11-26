@@ -10,7 +10,7 @@ import { ScenarioPanel } from "./components/ScenarioPanel";
 import { StockList } from "./components/StockList";
 import { TickerBar } from "./components/TickerBar";
 import { loadIndex, loadStock, resetStockCache } from "./lib/data";
-import { dateTimeKo, nextUpdateLabel, timeAgo } from "./lib/format";
+import { dateTimeKo, forecastTiming, nextUpdateLabel, timeAgo } from "./lib/format";
 import { loadWatchlist, saveWatchlist } from "./lib/storage";
 
 type MobileTab = "stocks" | "scenario" | "report";
@@ -181,8 +181,16 @@ export default function App() {
                 "다음 거래일 전망"
               )}
             </h1>
-            <p className="text-sm text-slate-600">
-              {dateTimeKo(index.generatedAt)} 갱신<span className="hidden sm:inline"> · 다음 {nextUpdateLabel()}</span>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+              <span>
+                {dateTimeKo(index.generatedAt)} 갱신<span className="hidden sm:inline"> · 다음 {nextUpdateLabel()}</span>
+              </span>
+              {(() => {
+                const t = forecastTiming(index.generatedAt, index.targetDate);
+                const label = { preopen: "장 시작 전 전망", late: "장 시작 후 갱신", previous: "전날 기준 · 장전 선물 미반영" }[t];
+                const tone = { preopen: "bg-emerald-100 text-emerald-900", late: "bg-amber-100 text-amber-900", previous: "bg-slate-100 text-slate-700" }[t];
+                return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${tone}`}>{label}</span>;
+              })()}
             </p>
           </div>
           <button
@@ -283,7 +291,7 @@ export default function App() {
 
       <footer className="mx-auto max-w-7xl px-4 pt-4 pb-8 text-sm leading-relaxed text-slate-500">
         <p>최근 1년 데이터로 학습한 통계 모델({index.model.name})의 참고값입니다. 투자 권유가 아니며, 투자 판단과 결과의 책임은 투자자 본인에게 있습니다.</p>
-        <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 07:20·16:40 자동 갱신.</p>
+        <p className="mt-1">데이터: 네이버 증권(국내 시세·투자자별 매매·뉴스), Yahoo Finance(해외 지표). 평일 08:05(장 시작 전)·16:40 자동 갱신.</p>
         <p className="mt-1">
           <a
             href="https://github.com/dhpaeng81-crypto/quant-simulator/actions/workflows/update.yml"
