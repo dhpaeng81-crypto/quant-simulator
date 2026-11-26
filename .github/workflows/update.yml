@@ -4,8 +4,15 @@ name: 데이터 갱신 및 배포
 
 on:
   schedule:
-    - cron: "40 7 * * 1-5" # 평일 16:40 KST (국내 장 마감 후: 종가·투자자별 매매 반영)
-    - cron: "20 22 * * 0-4" # 평일 07:20 KST (미국 장 마감 후, 국내 장 시작 전)
+    # 장 마감 후 (종가·투자자별 매매 반영)
+    - cron: "40 7 * * 1-5" # 평일 16:40 KST
+    # 장 시작 전 전망: GitHub 예약 실행은 몇 시간씩 늦는 일이 많아 저녁·새벽에 여러 번 걸어 두고,
+    # 먼저 시작된 실행이 GitHub 안에서 08:05 KST까지 기다렸다가 수집·배포 (scripts/preopen_wait.py)
+    - cron: "20 11 * * 0-4" # 20:20 KST
+    - cron: "20 14 * * 0-4" # 23:20 KST
+    - cron: "20 17 * * 0-4" # 02:20 KST
+    - cron: "20 20 * * 0-4" # 05:20 KST
+    - cron: "20 22 * * 0-4" # 07:20 KST
   workflow_dispatch:
   push:
     branches: [main]
@@ -15,12 +22,29 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
+  # 장 시작 전 예약 실행일 때만: 08:05 KST까지 대기 (너무 이르거나 이미 배포됐으면 건너뜀)
+  wait:
+    if: github.event_name == 'schedule' && github.event.schedule != '40 7 * * 1-5'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: preopen
+      cancel-in-progress: false
+    outputs:
+      go: ${{ steps.wait.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/preopen_wait.py
+          sparse-checkout-cone-mode: false
+      - id: wait
+        run: python3 -I scripts/preopen_wait.py
+
   build:
+    needs: wait
+    # 장전 예약이 아니면(대기 작업 건너뜀) 바로, 장전 예약이면 대기 결과가 진행일 때만
+    if: ${{ !cancelled() && (needs.wait.result == 'skipped' || needs.wait.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -44,6 +68,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -32,6 +32,8 @@ export const FEATURE_LABELS: Record<FeatureKey, { name: string; hint: string; un
   dxy: { name: "달러지수", hint: "전일 대비 변화율", unit: "%" },
   fx: { name: "원/달러 환율", hint: "전일 대비 변화율 (+는 원화 약세)", unit: "%" },
   oil: { name: "WTI 유가", hint: "전일 대비 변화율", unit: "%" },
+  futLate: { name: "미국 장 후반 흐름", hint: "나스닥 선물 00:00 → 06:00(장 마감) 변화율", unit: "%" },
+  futPre: { name: "장 시작 전 나스닥 선물", hint: "미국 장 마감(06:00) → 08:00 변화율", unit: "%" },
   foreign: { name: "외국인 순매수 (1일)", hint: "전 거래일 순매수량 ÷ 20일 평균 거래량", unit: "%" },
   institution: { name: "기관 순매수 (1일)", hint: "전 거래일 순매수량 ÷ 20일 평균 거래량", unit: "%" },
   foreign5: { name: "외국인 순매수 (5일)", hint: "최근 5거래일 누적 ÷ 20일 평균 거래량", unit: "%" },
@@ -41,7 +43,7 @@ export const FEATURE_LABELS: Record<FeatureKey, { name: string; hint: string; un
 };
 
 export const FEATURE_GROUPS: Array<{ name: string; keys: FeatureKey[] }> = [
-  { name: "밤사이 해외 시장", keys: ["nasdaq", "sox", "ewy", "vix", "us10y", "dxy", "fx", "oil"] },
+  { name: "밤사이 해외 시장", keys: ["nasdaq", "sox", "futLate", "futPre", "ewy", "vix", "us10y", "dxy", "fx", "oil"] },
   { name: "수급", keys: ["foreign", "institution", "foreign5", "institution5"] },
   { name: "종목 흐름", keys: ["prevReturn", "ret5"] },
 ];
@@ -259,12 +261,14 @@ export interface OosPrediction {
   actual: number;
 }
 
-export type Variant = "legacy" | "base" | "extended" | "panel";
+export type Variant = "legacy" | "base" | "baseFut" | "baseFut2" | "extended" | "panel";
 export const DEFAULT_VARIANT: Variant = "base";
 
 export const VARIANTS: Array<{ id: Variant; name: string; description: string }> = [
   { id: "legacy", name: "1차 모델", description: "입력 7개, 종목별 학습, 극단값 자르기 없음" },
   { id: "base", name: "기본 모델", description: "입력 7개, 종목별 학습, 평소의 5배 표준편차를 넘는 극단값만 자름" },
+  { id: "baseFut", name: "기본 + 장전 선물", description: "기본 모델에 장 시작 전(06:00→08:00) 나스닥 선물 변화를 더함" },
+  { id: "baseFut2", name: "기본 + 선물 흐름", description: "기본 + 장전 선물 + 미국 장 후반 흐름(00:00→06:00 나스닥 선물)" },
   { id: "extended", name: "확장 모델", description: "입력 14개(EWY·VIX·금리·달러·5일 수급·5일 수익률 추가), 종목별 학습" },
   { id: "panel", name: "패널 모델", description: "입력 14개, 100종목 공통 학습 + 종목별 보정" },
 ];
@@ -272,8 +276,10 @@ export const VARIANTS: Array<{ id: Variant; name: string; description: string }>
 const VARIANT_OPTS: Record<Variant, FitOptions & { panel?: boolean; stockLambdaRatio?: number }> = {
   legacy: { keys: LEGACY_KEYS, clip: false },
   base: { keys: LEGACY_KEYS, clipSd: 5 },
-  extended: { clipSd: 5 },
-  panel: { clipSd: 5, panel: true, stockLambdaRatio: 0.2 },
+  baseFut: { keys: [...LEGACY_KEYS, "futPre"], clipSd: 5 },
+  baseFut2: { keys: [...LEGACY_KEYS, "futPre", "futLate"], clipSd: 5 },
+  extended: { keys: FEATURE_KEYS.filter((k) => k !== "futPre" && k !== "futLate"), clipSd: 5 },
+  panel: { keys: FEATURE_KEYS.filter((k) => k !== "futPre" && k !== "futLate"), clipSd: 5, panel: true, stockLambdaRatio: 0.2 },
 };
 
 export function fitVariant(variant: Variant, byStock: Map<string, Sample[]>, target: Target): Map<string, LinearModel> {

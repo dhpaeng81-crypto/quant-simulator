@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts && python3 -I scripts/preopen_wait.py --self-test",
     "collect:minute": "tsx scripts/collect-minute.ts"
   },
   "engines": {

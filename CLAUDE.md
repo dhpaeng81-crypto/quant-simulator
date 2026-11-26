@@ -6,6 +6,7 @@
 
 - 서버 없음. `scripts/collect.ts`가 GitHub Actions에서 데이터를 모아 `public/data/*.json`을 만들고, 화면(`src/`)은 그 파일만 읽습니다.
 - 입력 만들기는 `shared/features.ts`, 학습·보정·평가는 `shared/model.ts` 한 곳에만 있습니다. 수집기와 화면(시나리오 재계산)이 같이 씁니다.
+- 예약 실행: 16:40(장 마감 후)과, 장 시작 전용 여러 예약을 `scripts/preopen_wait.py`가 08:05까지 기다리게 합니다. GitHub 예약 실행은 몇 시간씩 늦을 수 있습니다.
 - 모델을 바꿀 때는 `scripts/experiment.ts`로 같은 기준(통합 사후 평가, 기본 모델 대비 t값)에서 비교하고, **t ≥ 2로 나을 때만** 채택합니다. 수집기도 같은 규칙으로 자동 선택합니다.
 
 ## 규칙

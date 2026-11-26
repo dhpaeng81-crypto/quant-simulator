@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildSamples, sortMacro, type MacroSeries, type Sample } from "../shared/features";
+import { buildSamples, lateSessionMove, preOpenMove, sortMacro, type MacroSeries, type Sample } from "../shared/features";
 import { checkRanges, priceRange } from "../shared/range";
 import {
   calibrationBins,
@@ -43,7 +43,7 @@ import {
 } from "../shared/types";
 import { aiBriefing } from "./sources/gemini";
 import { fundamentals, indexBars, stockNews, stockRows, topByMarketValue, type RankedStock } from "./sources/naver";
-import { MACRO_SYMBOLS, yahooDaily } from "./sources/yahoo";
+import { MACRO_SYMBOLS, yahooDaily, yahooHourly } from "./sources/yahoo";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -89,6 +89,11 @@ async function fetchRaw(): Promise<Raw> {
   const keys = Object.keys(MACRO_SYMBOLS) as Array<keyof typeof MACRO_SYMBOLS>;
   const series = await Promise.all(keys.map((k) => yahooDaily(MACRO_SYMBOLS[k])));
   const macro = Object.fromEntries(keys.map((k, i) => [k, series[i]])) as unknown as MacroSeries;
+  // 장 시작 전 신호용 나스닥 선물 1시간봉 (실패해도 계속: 신호가 0이 됨)
+  macro.futHourly = await yahooHourly("NQ=F").catch((e) => {
+    console.warn(`[선물 1시간봉 실패] ${(e as Error).message}`);
+    return [];
+  });
   const [kospi, kosdaq] = await Promise.all([indexBars("KOSPI"), indexBars("KOSDAQ")]);
 
   const universe = [...(await topByMarketValue("KOSPI", N_KOSPI)), ...(await topByMarketValue("KOSDAQ", N_KOSDAQ))];
@@ -219,14 +224,22 @@ async function main() {
     return { ...v, metrics: m, vsDefault: vs };
   });
 
-  // 채택: 기본 모델. 다른 모델이 종가에서 t ≥ 2로 낫고 시가에서도 나빠지지 않을 때만 바꿈 (우연에 따라 매일 바뀌지 않도록)
+  // 채택: 기본 모델. 다른 모델이 시가나 종가 중 하나에서 t ≥ 2로 낫고, 다른 쪽에서 나빠지지 않을 때(t > −1)만 바꿈
+  // (우연에 따라 매일 바뀌지 않도록)
+  // 자격을 갖춘 후보 중에서는 시가·종가 개선(t값)의 합이 큰 쪽 (한쪽만 좋은 모델보다 둘 다 나은 모델을 우선)
+  const score = (v: ModelVariantResult) => (v.vsDefault.gap?.t ?? 0) + (v.vsDefault.close?.t ?? 0);
   const challengers = variants
     .filter((v) => v.id !== DEFAULT_VARIANT && v.id !== "legacy")
-    .filter((v) => (v.vsDefault.close?.t ?? 0) >= 2 && (v.vsDefault.gap?.brierDiff ?? -1) >= 0)
-    .sort((a, b) => b.vsDefault.close!.t - a.vsDefault.close!.t);
+    .filter((v) => {
+      const g = v.vsDefault.gap?.t ?? 0;
+      const c = v.vsDefault.close?.t ?? 0;
+      return (g >= 2 && c > -1) || (c >= 2 && g > -1);
+    })
+    .sort((a, b) => score(b) - score(a));
   const chosen = (challengers[0]?.id ?? DEFAULT_VARIANT) as Variant;
-  const chosenReason = challengers[0]
-    ? `${challengers[0].name}이(가) 종가 확률 오차를 기본 모델보다 의미 있게 줄여(t = ${challengers[0].vsDefault.close!.t}) 채택했습니다.`
+  const best = challengers[0];
+  const chosenReason = best
+    ? `${best.name}이(가) 기본 모델보다 확률 오차를 의미 있게 줄여(시가 t = ${best.vsDefault.gap?.t ?? "—"}, 종가 t = ${best.vsDefault.close?.t ?? "—"}) 채택했습니다.`
     : "다른 모델이 기본 모델보다 의미 있게 낫지 않아(모두 t < 2) 가장 단순한 기본 모델을 씁니다.";
   console.log(`평가 ${elapsed(t1)} · 채택: ${chosen}`);
   for (const v of variants)
@@ -318,14 +331,26 @@ async function main() {
     macroQuote("usdkrw", "원/달러", m.fx),
     macroQuote("oil", "WTI", m.oil),
   ];
+  const targetDate = [...latest.values()].map((b) => b.nextDate).find(Boolean) ?? "";
+  const futures = {
+    late: Math.round(lateSessionMove(macro.futHourly, targetDate, Date.now()) * 100) / 100,
+    preOpen: Math.round(preOpenMove(macro.futHourly, targetDate, Date.now()) * 100) / 100,
+  };
   const facts = buildFacts(macroQuotes, flows, summaries);
+  const nowKstHour = new Date(Date.now() + 9 * 3600_000);
+  const kstToday = nowKstHour.toISOString().slice(0, 10);
+  if (targetDate === kstToday && nowKstHour.getUTCHours() >= 6) {
+    facts.splice(1, 0, `나스닥 선물: 미국 장 후반(00→06시) ${signed(futures.late)}%, 장 시작 전(06→08시) ${signed(futures.preOpen)}%.`);
+  }
   const briefing: Briefing = { facts, ai: await aiBriefing(facts) };
   const lastDate = summaries.map((s) => s.date).sort().at(-1) ?? "";
   const chosenInfo = VARIANTS.find((v) => v.id === chosen)!;
 
   const index: IndexFile = {
     generatedAt: new Date().toISOString(),
-    nextTradingDayNote: `${lastDate} 장 마감까지의 데이터와 그 뒤 미국 시장 값으로 계산한 '다음 거래일' 전망입니다.`,
+    nextTradingDayNote: `${lastDate} 장 마감까지의 데이터와 그 뒤 미국 시장 값으로 계산한 ${targetDate ? `${Number(targetDate.slice(5, 7))}월 ${Number(targetDate.slice(8, 10))}일` : "다음 거래일"} 전망입니다.`,
+    targetDate,
+    futures,
     model: { id: chosen, name: chosenInfo.name },
     calibration: liveCal,
     macro: macroQuotes,

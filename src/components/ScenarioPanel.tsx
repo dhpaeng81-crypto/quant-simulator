@@ -21,6 +21,8 @@ const MIN_RANGE: Record<FeatureKey, number> = {
   dxy: 1.5,
   fx: 2,
   oil: 6,
+  futPre: 2,
+  futLate: 4,
   foreign: 20,
   institution: 20,
   foreign5: 50,

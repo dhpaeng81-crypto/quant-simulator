@@ -14,6 +14,8 @@ export const FEATURE_KEYS = [
   "dxy",
   "fx",
   "oil",
+  "futLate", // 미국 장 후반 흐름: 00:00 → 06:00(장 마감 무렵) 나스닥 선물 변화
+  "futPre", // 장 시작 직전: 미국 장 마감(06:00) → 08:00 나스닥 선물 변화
   // 수급
   "foreign",
   "institution",
@@ -203,6 +205,10 @@ export interface Briefing {
 export interface IndexFile {
   generatedAt: string; // ISO
   nextTradingDayNote: string;
+  /** 이 전망이 대상으로 하는 거래일 (YYYY-MM-DD) */
+  targetDate?: string;
+  /** 만들 때 반영된 선물 신호 (%). 미국 장 마감 전이면 0 */
+  futures?: { late: number; preOpen: number };
   model: { id: string; name: string };
   calibration: Record<Target, Calibration | null>;
   macro: MacroQuote[];
