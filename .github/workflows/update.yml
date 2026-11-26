@@ -67,6 +67,8 @@ jobs:
 
   deploy:
     needs: build
+    # 앞의 wait 작업이 건너뛰어지면 GitHub는 뒤 작업도 기본으로 건너뜀 → 빌드 성공이면 배포하도록 명시
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     concurrency:
       group: pages
