@@ -208,7 +208,7 @@ export interface IndexFile {
   /** 이 전망이 대상으로 하는 거래일 (YYYY-MM-DD) */
   targetDate?: string;
   /** 만들 때 반영된 선물 신호 (%). 미국 장 마감 전이면 0 */
-  futures?: { late: number; preOpen: number };
+  futures?: { late: number | null; preOpen: number | null }; // null = 그 시간대 선물 거래 데이터 없음 (미국 휴장 등)
   model: { id: string; name: string };
   calibration: Record<Target, Calibration | null>;
   macro: MacroQuote[];

@@ -84,6 +84,23 @@ export function lateSessionMove(series: Array<{ t: number; c: number }> | undefi
   return futuresMove(series, dateKst, 0, 6, nowMs);
 }
 
+/**
+ * 그 시간대(fromH → toH시, KST)에 실제로 거래된 선물 봉이 있는지.
+ * 미국 휴장·거래 정지 등으로 없으면 신호는 0으로 계산되지만, 화면에는 '데이터 없음'으로 보여야 함
+ */
+export function futuresAvailable(
+  series: Array<{ t: number; c: number }> | undefined,
+  dateKst: string,
+  window: "late" | "preOpen",
+  nowMs = Infinity,
+): boolean {
+  if (!series || series.length === 0) return false;
+  const [fromH, toH] = window === "late" ? [0, 6] : [6, 8];
+  const from = kstTime(dateKst, fromH);
+  const to = Math.min(kstTime(dateKst, toH), nowMs);
+  return series.some((b) => b.t > from && b.t <= to);
+}
+
 /** dateKst의 fromH시 → toH시(KST) 선물 변화. nowMs 이후 값은 쓰지 않음, 정보가 없으면 0 */
 function futuresMove(series: Array<{ t: number; c: number }> | undefined, dateKst: string, fromH: number, toH: number, nowMs: number): number {
   if (!series || series.length === 0) return 0;
@@ -96,11 +113,12 @@ function futuresMove(series: Array<{ t: number; c: number }> | undefined, dateKs
   return pct(pre.c, ref.c);
 }
 
-/** 지금 시각 기준 '다음 한국 거래일' (09:00 전이면 오늘, 주말 건너뜀, 공휴일은 고려하지 않음) */
+/** 지금 시각 기준 전망 대상 거래일 (15:40 장 마감 전이면 오늘, 이후면 다음 평일. 공휴일은 고려하지 않음) */
 export function nextTradingDate(nowMs: number, after: string): string {
   const k = new Date(nowMs + 9 * HOUR);
   let d = new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()));
-  if (k.getUTCHours() >= 9) d = new Date(d.getTime() + 24 * HOUR);
+  // 장 마감(15:40) 전에는 오늘 일봉이 아직 없으므로(수집기가 제외) 전망 대상은 오늘. 마감 뒤에만 다음 날로
+  if (k.getUTCHours() * 60 + k.getUTCMinutes() >= 15 * 60 + 40) d = new Date(d.getTime() + 24 * HOUR);
   for (;;) {
     const s = d.toISOString().slice(0, 10);
     const wd = d.getUTCDay();

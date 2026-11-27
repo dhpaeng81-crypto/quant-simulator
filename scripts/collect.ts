@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildSamples, lateSessionMove, preOpenMove, sortMacro, type MacroSeries, type Sample } from "../shared/features";
+import { buildSamples, futuresAvailable, lateSessionMove, preOpenMove, sortMacro, type MacroSeries, type Sample } from "../shared/features";
 import { checkRanges, priceRange } from "../shared/range";
 import {
   calibrationBins,
@@ -332,15 +332,24 @@ async function main() {
     macroQuote("oil", "WTI", m.oil),
   ];
   const targetDate = [...latest.values()].map((b) => b.nextDate).find(Boolean) ?? "";
+  const now = Date.now();
+  const r2f = (v: number) => Math.round(v * 100) / 100;
   const futures = {
-    late: Math.round(lateSessionMove(macro.futHourly, targetDate, Date.now()) * 100) / 100,
-    preOpen: Math.round(preOpenMove(macro.futHourly, targetDate, Date.now()) * 100) / 100,
+    late: futuresAvailable(macro.futHourly, targetDate, "late", now) ? r2f(lateSessionMove(macro.futHourly, targetDate, now)) : null,
+    preOpen: futuresAvailable(macro.futHourly, targetDate, "preOpen", now) ? r2f(preOpenMove(macro.futHourly, targetDate, now)) : null,
   };
   const facts = buildFacts(macroQuotes, flows, summaries);
   const nowKstHour = new Date(Date.now() + 9 * 3600_000);
   const kstToday = nowKstHour.toISOString().slice(0, 10);
   if (targetDate === kstToday && nowKstHour.getUTCHours() >= 6) {
-    facts.splice(1, 0, `나스닥 선물: 미국 장 후반(00→06시) ${signed(futures.late)}%, 장 시작 전(06→08시) ${signed(futures.preOpen)}%.`);
+    const fmt = (v: number | null) => (v === null ? "데이터 없음" : `${signed(v)}%`);
+    facts.splice(
+      1,
+      0,
+      futures.late === null && futures.preOpen === null
+        ? "나스닥 선물: 밤사이 거래 데이터가 없어(미국 휴장 등) 선물 신호 없이 계산했습니다."
+        : `나스닥 선물: 미국 장 후반(00→06시) ${fmt(futures.late)}, 장 시작 전(06→08시) ${fmt(futures.preOpen)}.`,
+    );
   }
   const briefing: Briefing = { facts, ai: await aiBriefing(facts) };
   const lastDate = summaries.map((s) => s.date).sort().at(-1) ?? "";
